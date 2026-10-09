@@ -1,0 +1,41 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  --color-bg: #f3f5f8;
+  --color-surface: #ffffff;
+  --color-subtle: #f7f9fb;
+  --color-line: #e2e7ee;
+  --color-line-strong: #cbd3de;
+  --color-ink: #0f1b2d;
+  --color-muted: #55657a;
+  --color-faint: #8593a7;
+  --color-navy: #0b1f3a;
+  --color-navy-2: #16304f;
+  --color-accent: #0e7490;
+  --color-accent-strong: #155e75;
+  --color-accent-soft: #e6f5f8;
+  --color-danger: #c62828;
+}
+
+html, body, #root { height: 100%; }
+body { background: var(--color-bg); color: var(--color-ink); -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+button, a { -webkit-user-select: none; user-select: none; }
+
+@utility card { @apply rounded-lg border border-line bg-surface; }
+@utility btn { @apply inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 text-sm font-semibold transition-colors disabled:pointer-events-none disabled:opacity-50; }
+@utility btn-primary { @apply btn bg-accent text-white hover:bg-accent-strong; }
+@utility btn-navy { @apply btn bg-navy text-white hover:bg-navy-2; }
+@utility btn-danger { @apply btn bg-danger text-white hover:bg-red-800; }
+@utility btn-outline { @apply btn border border-line-strong bg-surface text-ink hover:bg-subtle; }
+@utility btn-ghost { @apply btn text-muted hover:bg-subtle hover:text-ink; }
+@utility chip { @apply inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-line-strong bg-surface px-3 text-xs font-semibold text-muted hover:text-ink; }
+@utility chip-on { @apply border-navy bg-navy text-white hover:text-white; }
+@utility input { @apply h-10 w-full min-w-0 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink placeholder:text-faint outline-none focus:border-accent focus:ring-3 focus:ring-accent/15; }
+@utility eyebrow { @apply text-[11px] font-semibold uppercase tracking-wider text-faint; }
+
+.maplibregl-ctrl-attrib { font-size: 10px; }
+.maplibregl-ctrl-group { border-radius: 8px !important; }
+[data-sonner-toaster] { font-family: var(--font-sans); }

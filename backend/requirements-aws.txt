@@ -1,0 +1,3 @@
+-r requirements.txt
+boto3==1.43.110
+anthropic[bedrock]==1.12.1

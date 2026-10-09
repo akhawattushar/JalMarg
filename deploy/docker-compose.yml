@@ -1,0 +1,16 @@
+services:
+  api:
+    build: ../backend
+    env_file: ../backend/.env
+    volumes: [jalmarg-data:/data]
+    restart: unless-stopped
+  caddy:
+    image: caddy:2
+    ports: ["80:80", "443:443"]
+    environment: [DOMAIN]
+    volumes: [./Caddyfile:/etc/caddy/Caddyfile:ro, caddy-data:/data]
+    depends_on: [api]
+    restart: unless-stopped
+volumes:
+  jalmarg-data:
+  caddy-data:

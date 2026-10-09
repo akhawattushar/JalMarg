@@ -1,0 +1,10 @@
+{
+  "name": "JalMarg",
+  "short_name": "JalMarg",
+  "description": "Report it. Avoid it. Fix it before next monsoon.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f3f5f8",
+  "theme_color": "#0b1f3a",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
