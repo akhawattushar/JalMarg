@@ -83,9 +83,9 @@ export default function MapPage() {
         <MapView center={at || DEFAULT} zoom={13} incidents={markers} selected={sel} onSelect={pick} user={fix} focus={focus}
           padding={{ top: 60, right: 40, bottom: 200, left: 40 }} />
         {error && !fix && <div className="absolute inset-x-3 top-3 z-10 lg:left-auto lg:w-96"><Notice tone="warn"><span className="flex items-center gap-1.5"><MapPinOff size={14} className="shrink-0" />{error} Showing New Delhi.</span></Notice></div>}
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 grid gap-2 p-3 pt-[max(.75rem,env(safe-area-inset-top))] lg:hidden">
-          {!(error && !fix) && <div className="pointer-events-auto card grid gap-1 px-3 py-2 shadow-sm">
-            {place && <p className="flex items-center gap-1.5 text-xs text-muted"><MapPin size={12} className="shrink-0" /><span className="truncate">{place}</span></p>}
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 grid grid-cols-[minmax(0,1fr)] gap-2 p-3 pt-[max(.75rem,env(safe-area-inset-top))] lg:hidden">
+          {!(error && !fix) && <div className="pointer-events-auto card grid min-w-0 gap-1 px-3 py-2 shadow-sm">
+            {place && <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted"><MapPin size={12} className="shrink-0" /><span className="truncate">{place}</span></p>}
             <WeatherStrip wx={wx} risk={risk} />{!wx && <span className="text-sm text-muted">Loading conditions…</span>}</div>}
           <div className="pointer-events-auto">{filters}</div>
         </div>

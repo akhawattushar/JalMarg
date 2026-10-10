@@ -1,6 +1,11 @@
 import * as maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+// MapLibre builds its worker URL at runtime, so bundlers never emit the file and production maps stay blank.
+// Bundle it explicitly (as a .js asset, which static hosts serve with the right MIME type) and point MapLibre at it.
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { LINE, markerColor, markerSize, pin, type Engine, type EngineOpts } from './engine'
+
+maplibregl.setWorkerUrl(workerUrl)
 
 const STYLE = 'https://tiles.openfreemap.org/styles/positron'
 // Fallback when the vector style can't load: standard OSM raster tiles (no labels on clusters, but a real map).
