@@ -3,7 +3,12 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import { LINE, markerColor, markerSize, pin, type Engine, type EngineOpts } from './engine'
 
 const STYLE = 'https://tiles.openfreemap.org/styles/positron'
-const BLANK = { version: 8 as const, sources: {}, layers: [{ id: 'bg', type: 'background' as const, paint: { 'background-color': '#eef2f6' } }] }
+// Fallback when the vector style can't load: standard OSM raster tiles (no labels on clusters, but a real map).
+const RASTER = {
+  version: 8 as const,
+  sources: { osm: { type: 'raster' as const, tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 19, attribution: '© OpenStreetMap contributors' } },
+  layers: [{ id: 'bg', type: 'background' as const, paint: { 'background-color': '#eef2f6' } }, { id: 'osm', type: 'raster' as const, source: 'osm' }],
+}
 const fc = (features: object[]) => ({ type: 'FeatureCollection', features }) as never
 
 export function createLibre(o: EngineOpts): Promise<Engine> {
@@ -63,9 +68,11 @@ export function createLibre(o: EngineOpts): Promise<Engine> {
       }
       ok(engine)
     }
+    let fellBack = false
     map.once('style.load', init)
-    const fallback = () => { if (!done) { map.setStyle(BLANK); map.once('style.load', init) } }
-    map.on('error', fallback)
-    setTimeout(fallback, 6000)
+    // Only a failure of the style itself (not a single tile) should switch styles; slow mobile networks get 15 s.
+    const fallback = () => { if (!done && !fellBack) { fellBack = true; map.setStyle(RASTER); map.once('style.load', init) } }
+    map.on('error', (e) => { if (!map.isStyleLoaded()) { console.warn('map style failed, using raster tiles', e.error); fallback() } })
+    setTimeout(fallback, 15000)
   })
 }

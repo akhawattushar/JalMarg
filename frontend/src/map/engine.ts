@@ -37,7 +37,10 @@ export function pin(kind: 'user' | 'dest') {
   return d
 }
 
-export async function createEngine(cfg: Config, o: EngineOpts): Promise<Engine> {
-  if (cfg.map_provider === 'google' && cfg.google_maps_key) return (await import('./google')).createGoogle(cfg, o)
+/** Google when configured; otherwise (or if Google fails to load) the open-source MapLibre + OpenStreetMap engine. */
+export async function createEngine(cfg: Config | null, o: EngineOpts): Promise<Engine> {
+  if (cfg?.map_provider === 'google' && cfg.google_maps_key) {
+    try { return await (await import('./google')).createGoogle(cfg, o) } catch (e) { console.warn('Google Maps unavailable, using OpenStreetMap', e) }
+  }
   return (await import('./libre')).createLibre(o)
 }

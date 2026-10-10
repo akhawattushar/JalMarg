@@ -1,4 +1,6 @@
 import math
+import threading
+import time
 from dataclasses import dataclass
 
 from .. import config as C
@@ -54,6 +56,43 @@ def decode_polyline(s):
     return out
 
 
+_nominatim_lock, _nominatim_last = threading.Lock(), [0.0]
+
+
+def nominatim(path, params):
+    """Public Nominatim allows at most one request per second; serialise calls and cache results."""
+    with _nominatim_lock:
+        wait = _nominatim_last[0] + 1.0 - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        try:
+            return get(f"https://nominatim.openstreetmap.org/{path}", params={**params, "accept-language": "en"})
+        finally:
+            _nominatim_last[0] = time.monotonic()
+
+
+def photon_reverse(lat, lng):
+    """Photon (komoot, open source, keyless): fallback geocoder when Nominatim is unavailable."""
+    r = get("https://photon.komoot.io/reverse", params={"lat": lat, "lon": lng, "lang": "en", "limit": 1})
+    f = (r.get("features") or [None])[0]
+    if not f:
+        return None
+    p = f["properties"]
+    parts = [p.get("name"), " ".join(x for x in (p.get("housenumber"), p.get("street")) if x) or None, p.get("district") or p.get("locality"),
+             p.get("city"), p.get("state"), p.get("postcode")]
+    seen, out = set(), []
+    for x in parts:
+        if x and x not in seen:
+            seen.add(x)
+            out.append(x)
+    return {"address": ", ".join(out), "road": p.get("street") or (p.get("name") if p.get("osm_key") == "highway" else None),
+            "locality": p.get("district") or p.get("locality") or p.get("city")}
+
+
+def _k(lat, lng):
+    return f"{round(lat, 4)},{round(lng, 4)}"
+
+
 class GoogleMapsService:
     name = "google"
     attribution = "Google Maps"
@@ -75,6 +114,17 @@ class GoogleMapsService:
         comp = {t: c["long_name"] for c in g.get("address_components", []) for t in c["types"]}
         return Road(pid, comp.get("route"), loc["latitude"], loc["longitude"], g.get("formatted_address", ""),
                     comp.get("sublocality_level_1") or comp.get("sublocality") or comp.get("locality"))
+
+    def reverse(self, lat, lng):
+        def fetch():
+            r = get("https://maps.googleapis.com/maps/api/geocode/json", params={"latlng": f"{lat},{lng}", "key": C.GOOGLE_KEY})
+            g = (r.get("results") or [None])[0]
+            if not g:
+                return None
+            comp = {t: c["long_name"] for c in g.get("address_components", []) for t in c["types"]}
+            return {"address": g.get("formatted_address", ""), "road": comp.get("route"),
+                    "locality": comp.get("sublocality_level_1") or comp.get("sublocality") or comp.get("locality")}
+        return cached("grev:" + _k(lat, lng), 86400, fetch)
 
     def search(self, text, lat, lng):
         r = post("https://places.googleapis.com/v1/places:searchText", headers=self._h("places.displayName,places.formattedAddress,places.location"),
@@ -105,8 +155,7 @@ class OsmMapService:
     attribution = "© OpenStreetMap contributors"
 
     def match_road(self, lat, lng):
-        r = get("https://nominatim.openstreetmap.org/reverse", params={"lat": lat, "lon": lng, "format": "jsonv2", "zoom": 17,
-                                                                      "layer": "address", "accept-language": "en"})
+        r = cached("nroad:" + _k(lat, lng), 86400, lambda: nominatim("reverse", {"lat": lat, "lon": lng, "format": "jsonv2", "zoom": 17, "layer": "address"}))
         a = r.get("address") or {}
         if r.get("category") != "highway" and not a.get("road"):
             return None
@@ -114,12 +163,33 @@ class OsmMapService:
         return Road(seg, a.get("road") or r.get("name"), float(r["lat"]), float(r["lon"]), r.get("display_name", ""),
                     a.get("suburb") or a.get("city_district") or a.get("neighbourhood") or a.get("city"))
 
+    def reverse(self, lat, lng):
+        def fetch():
+            try:
+                r = nominatim("reverse", {"lat": lat, "lon": lng, "format": "jsonv2", "zoom": 18})
+            except Exception:
+                return photon_reverse(lat, lng)
+            if not r.get("display_name"):
+                return photon_reverse(lat, lng)
+            a = r.get("address") or {}
+            return {"address": r["display_name"], "road": a.get("road"),
+                    "locality": a.get("suburb") or a.get("city_district") or a.get("neighbourhood") or a.get("city") or a.get("town") or a.get("village")}
+        return cached("nrev:" + _k(lat, lng), 86400, fetch)
+
     def search(self, text, lat, lng):
         d = 0.5
-        r = get("https://nominatim.openstreetmap.org/search", params={"q": text, "format": "jsonv2", "limit": 6, "countrycodes": "in",
-                                                                     "viewbox": f"{lng - d},{lat + d},{lng + d},{lat - d}"})
-        return [{"name": x.get("name") or x["display_name"].split(",")[0], "address": x["display_name"], "lat": float(x["lat"]),
-                 "lng": float(x["lon"])} for x in r]
+
+        def fetch():
+            try:
+                r = nominatim("search", {"q": text, "format": "jsonv2", "limit": 6, "countrycodes": "in", "viewbox": f"{lng - d},{lat + d},{lng + d},{lat - d}"})
+                return [{"name": x.get("name") or x["display_name"].split(",")[0], "address": x["display_name"], "lat": float(x["lat"]),
+                         "lng": float(x["lon"])} for x in r]
+            except Exception:
+                r = get("https://photon.komoot.io/api/", params={"q": text, "lat": lat, "lon": lng, "limit": 6, "lang": "en"})
+                return [{"name": f["properties"].get("name") or f["properties"].get("street") or text,
+                         "address": ", ".join(x for x in (f["properties"].get(k) for k in ("street", "district", "city", "state")) if x),
+                         "lat": f["geometry"]["coordinates"][1], "lng": f["geometry"]["coordinates"][0]} for f in r.get("features", [])]
+        return cached(f"nsearch:{text.lower()}:{round(lat, 1)},{round(lng, 1)}", 3600, fetch)
 
     def routes(self, o, d):
         r = get(f"https://router.project-osrm.org/route/v1/driving/{o[1]},{o[0]};{d[1]},{d[0]}",
@@ -151,6 +221,10 @@ class MockMapService:
 
     def search(self, text, lat, lng):
         return [{"name": text, "address": "Test City", "lat": lat + 0.01, "lng": lng + 0.01}]
+
+    def reverse(self, lat, lng):
+        road = self.match_road(lat, lng)
+        return {"address": road.address if road else "Test City", "road": road.name if road else None, "locality": "Test Ward"}
 
     def routes(self, o, d):
         straight = [[o[1], o[0]], [d[1], d[0]]]

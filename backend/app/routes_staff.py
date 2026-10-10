@@ -252,7 +252,7 @@ def raise_issue(wid: str, photo: UploadFile = File(), text: str = Form(min_lengt
 
 @r.get("/ward/issues")
 def issues(user=Depends(officer)):
-    rows = db.q("SELECT f.*, u.name AS author, u.phone, i.road_name, w.assignee_id FROM feedback f JOIN users u ON u.id=f.user_id "
+    rows = db.q("SELECT f.*, u.name AS author, u.role, i.road_name, w.assignee_id FROM feedback f JOIN users u ON u.id=f.user_id "
                 "JOIN incidents i ON i.id=f.incident_id JOIN work_orders w ON w.id=f.work_order_id "
                 "WHERE f.kind='issue' ORDER BY f.status='closed', f.created_at DESC LIMIT 100")
     out = []
@@ -260,7 +260,7 @@ def issues(user=Depends(officer)):
         ev = db.one("SELECT * FROM evidence WHERE id=?", f["evidence_id"])
         worker_u = db.one("SELECT name, employee_id FROM users WHERE id=?", f["assignee_id"]) if f["assignee_id"] else None
         out.append({k: f[k] for k in ("id", "work_order_id", "incident_id", "text", "status", "note", "created_at", "road_name")}
-                   | {"author": f["author"] or auth.mask(f["phone"]), "worker": worker_u, "evidence": evidence_out(ev, True) if ev else None})
+                   | {"author": f["author"] or auth.mask(f["role"], f["user_id"]), "worker": worker_u, "evidence": evidence_out(ev, True) if ev else None})
     return out
 
 
@@ -319,7 +319,7 @@ def _staff_member(uid, actor):
 @r.get("/staff")
 def staff(user=Depends(officer)):
     roles = "('worker','ward_officer')" if user["role"] == "admin" else "('worker')"
-    return db.q(f"SELECT id, employee_id, name, role, ward, phone, status, must_change_password, created_at, last_seen, {RATING_SQL} AS rating, "
+    return db.q(f"SELECT id, employee_id, name, role, ward, phone, status, must_change_password, created_at, last_seen, {RATING_SQL} AS rating, "  # nosec B608
                 "(SELECT COUNT(*) FROM work_orders WHERE assignee_id=users.id AND status='done') AS completed "
                 f"FROM users WHERE role IN {roles} AND status!='removed' ORDER BY role DESC, name")
 
@@ -348,8 +348,9 @@ def patch_staff(uid: str, b: StaffPatch, user=Depends(officer)):
         _manageable(user, "ward_officer")
     if not upd:
         raise HTTPException(422, "Nothing to update")
-    db.ex(f"UPDATE users SET {', '.join(f'{k}=?' for k in upd)} WHERE id=?", *upd.values(), uid)
+    db.ex(f"UPDATE users SET {', '.join(f'{k}=?' for k in upd)} WHERE id=?", *upd.values(), uid)  # nosec B608
     if upd.get("status") in ("blocked", "removed"):
+        auth.end_all_sessions(uid)
         db.ex("UPDATE work_orders SET assignee_id=NULL, status='created' WHERE assignee_id=? AND status IN ('assigned','on_the_way','in_progress')", uid)
     db.audit(user["id"], "staff.update", t["employee_id"], json.dumps(upd))
     return {"ok": True}
@@ -360,20 +361,22 @@ def reset_staff_password(uid: str, user=Depends(officer)):
     t = _staff_member(uid, user)
     pw = _temp_password()
     db.ex("UPDATE users SET password_hash=?, must_change_password=1, failed_logins=0, locked_until=NULL WHERE id=?", auth.hash_password(pw), uid)
+    auth.end_all_sessions(uid)
     db.audit(user["id"], "staff.reset_password", t["employee_id"])
     return {"employee_id": t["employee_id"], "temporary_password": pw}
 
 
 @r.get("/admin/reports")
 def admin_reports(verification: str | None = None, user=Depends(admin)):
-    rows = db.q("SELECT r.*, u.phone FROM reports r LEFT JOIN users u ON u.id=r.user_id " +
+    rows = db.q("SELECT r.*, u.email AS reporter_email, u.name AS reporter_name FROM reports r LEFT JOIN users u ON u.id=r.user_id " +  # nosec B608
                 ("WHERE r.verification=? " if verification else "") + "ORDER BY r.created_at DESC LIMIT 100", *([verification] if verification else []))
     out = []
     for rep in rows:
         ev = db.one("SELECT * FROM evidence WHERE id=?", rep["evidence_id"])
         out.append({k: rep[k] for k in ("id", "incident_id", "road_name", "address", "problem_type", "severity", "verification", "gps_accuracy",
                                          "captured_at", "server_received_at", "match_decision", "note", "lat", "lng")}
-                   | {"reporter": auth.mask(rep["phone"]), "signals": json.loads(rep["signals"]), "evidence": evidence_out(ev, True) if ev else None})
+                   | {"reporter": rep["reporter_name"] or rep["reporter_email"] or auth.mask("citizen", rep["user_id"]), "signals": json.loads(rep["signals"]),
+                      "evidence": evidence_out(ev, True) if ev else None})
     return out
 
 
@@ -398,7 +401,8 @@ def set_verification(rid: str, b: Verdict, user=Depends(admin)):
 
 @r.get("/admin/users")
 def users(user=Depends(admin)):
-    return db.q("SELECT u.id, u.phone, u.name, u.address, u.role, u.status, u.created_at, u.last_seen, (SELECT COUNT(*) FROM reports WHERE user_id=u.id) AS reports, "
+    return db.q("SELECT u.id, u.email, u.email_verified, u.phone, u.name, u.address, u.role, u.status, u.created_at, u.last_seen, "
+                "(SELECT COUNT(*) FROM reports WHERE user_id=u.id) AS reports, "
                 "(SELECT COUNT(*) FROM reports WHERE user_id=u.id AND verification IN ('suspicious','rejected')) AS flagged "
                 "FROM users u WHERE role IN ('citizen','commuter') ORDER BY u.created_at DESC LIMIT 200")
 
@@ -415,11 +419,14 @@ def patch_user(uid: str, b: UserPatch, user=Depends(admin)):
     upd = b.model_dump(exclude_none=True)
     if not upd:
         raise HTTPException(422, "Nothing to update")
-    db.ex(f"UPDATE users SET {', '.join(f'{k}=?' for k in upd)} WHERE id=?", *upd.values(), uid)
+    db.ex(f"UPDATE users SET {', '.join(f'{k}=?' for k in upd)} WHERE id=?", *upd.values(), uid)  # nosec B608
+    if upd.get("status") == "blocked":
+        auth.end_all_sessions(uid)
     db.audit(user["id"], "user.update", uid, json.dumps(upd))
     return {"ok": True}
 
 
 @r.get("/admin/audit")
 def audit_log(user=Depends(admin)):
-    return db.q("SELECT a.*, COALESCE(u.employee_id, u.phone) AS phone FROM audit_log a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.created_at DESC LIMIT 200")
+    return db.q("SELECT a.*, COALESCE(u.employee_id, u.email, u.phone) AS phone FROM audit_log a LEFT JOIN users u ON u.id=a.actor_id "
+                "ORDER BY a.created_at DESC LIMIT 200")

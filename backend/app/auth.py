@@ -1,18 +1,20 @@
 import base64
 import hashlib
 import hmac
-import json
 import re
 import secrets
 import time
+from collections import defaultdict, deque
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 
 from . import config as C
 from . import db
 
 ROLES = ("citizen", "commuter", "worker", "ward_officer", "admin")
 STAFF = {"ward_officer": {"ward_officer", "admin"}, "worker": {"worker", "ward_officer", "admin"}, "admin": {"admin"}}
+EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,}$")
+VERIFY_TTL, RESET_TTL = 24 * 3600, 30 * 60
 
 
 def _secret():
@@ -29,138 +31,106 @@ def _b64(b):
     return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
 
 
-def _sign(body):
-    return _b64(hmac.new(_secret(), body.encode(), hashlib.sha256).digest())
+def _sha(s):
+    return hashlib.sha256(s.encode()).hexdigest()
 
 
-def issue_token(user_id, hours=24):
-    body = _b64(json.dumps({"sub": user_id, "exp": int(time.time()) + hours * 3600}).encode())
-    return f"{body}.{_sign(body)}", hours * 3600
+# ---------- Passwords (scrypt, parameters stored with the hash) ----------
+_N, _R, _P = 2**15, 8, 1
 
 
-def _verify(token):
-    try:
-        body, sig = token.split(".")
-        claims = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
-    except ValueError:
-        return None
-    if not hmac.compare_digest(sig, _sign(body)) or claims["exp"] < time.time():
-        return None
-    return claims["sub"]
-
-
-def _hash(code, phone):
-    return hashlib.sha256(f"{code}:{phone}:{_secret().decode()}".encode()).hexdigest()
+def _scrypt(pw, salt, n, r, p):
+    return hashlib.scrypt(pw.encode(), salt=salt, n=n, r=r, p=p, maxmem=128 * r * n * 2).hex()
 
 
 def hash_password(pw):
     salt = secrets.token_bytes(16)
-    return f"scrypt${salt.hex()}${hashlib.scrypt(pw.encode(), salt=salt, n=2**14, r=8, p=1).hex()}"
+    return f"scrypt${_N}${_R}${_P}${salt.hex()}${_scrypt(pw, salt, _N, _R, _P)}"
 
 
-def _password_ok(stored, pw):
+def _parse(stored):
+    parts = (stored or "").split("$")
+    if len(parts) == 6 and parts[0] == "scrypt":
+        return int(parts[1]), int(parts[2]), int(parts[3]), bytes.fromhex(parts[4]), parts[5]
+    if len(parts) == 3 and parts[0] == "scrypt":  # legacy format, n=2**14
+        return 2**14, 8, 1, bytes.fromhex(parts[1]), parts[2]
+    raise ValueError("unknown hash format")
+
+
+def password_ok(stored, pw):
     try:
-        _, salt, digest = stored.split("$")
-    except (AttributeError, ValueError):
+        n, r, p, salt, digest = _parse(stored)
+    except (ValueError, TypeError):
         return False
-    return hmac.compare_digest(digest, hashlib.scrypt(pw.encode(), salt=bytes.fromhex(salt), n=2**14, r=8, p=1).hex())
+    return hmac.compare_digest(digest, _scrypt(pw, salt, n, r, p))
 
 
-def _check_phone(phone, purpose):
-    if not re.fullmatch(r"\+91[6-9]\d{9}", phone):
-        raise HTTPException(422, "Enter a valid Indian mobile number")
-    if purpose == "admin" and phone not in C.ADMIN_PHONES:
-        raise HTTPException(403, "This number is not registered as an administrator")
-    u = db.one("SELECT role FROM users WHERE phone=?", phone)
-    if purpose == "citizen" and u and u["role"] in ("worker", "ward_officer"):
-        raise HTTPException(403, "Municipal staff sign in with their Employee ID")
+def _needs_rehash(stored):
+    try:
+        return _parse(stored)[:3] != (_N, _R, _P)
+    except (ValueError, TypeError):
+        return False
 
 
-def start_otp(phone, purpose="citizen"):
-    _check_phone(phone, purpose)
-    t, cur = db.now(), db.one("SELECT * FROM otps WHERE phone=?", phone) or {}
-    if cur.get("sent_at", 0) > t - 30:
-        raise HTTPException(429, "Please wait 30 seconds before requesting another code")
-    sends = cur.get("sends", 0) + 1 if cur.get("sent_at", 0) > t - 3600 else 1
-    if sends > 5:
-        raise HTTPException(429, "Too many codes requested. Try again in an hour.")
-    code = f"{secrets.randbelow(10**6):06d}"
-    db.ex("INSERT OR REPLACE INTO otps VALUES (?,?,?,0,?,?)", phone, _hash(code, phone), t + 300, t, sends)
-    if C.OTP_DELIVERY == "sns":
-        import boto3
-        boto3.client("sns", region_name=C.AWS_REGION).publish(
-            PhoneNumber=phone, Message=f"{code} is your JalMarg sign-in code. It expires in 5 minutes.",
-            MessageAttributes={"AWS.SNS.SMS.SMSType": {"DataType": "String", "StringValue": "Transactional"}})
-    else:
-        print(f"[OTP] {phone}: {code}", flush=True)
+_DUMMY = None
 
 
-def verify_otp(phone, code, purpose="citizen"):
-    _check_phone(phone, purpose)
-    cur = db.one("SELECT * FROM otps WHERE phone=?", phone)
-    if not cur or cur["expires"] < db.now():
-        raise HTTPException(400, "Code expired. Request a new one.")
-    if cur["tries"] >= 5:
-        raise HTTPException(429, "Too many wrong attempts. Request a new code.")
-    if not hmac.compare_digest(cur["hash"], _hash(code, phone)):
-        db.ex("UPDATE otps SET tries=tries+1 WHERE phone=?", phone)
-        raise HTTPException(400, "Incorrect code")
-    db.ex("DELETE FROM otps WHERE phone=?", phone)
-    role = "admin" if phone in C.ADMIN_PHONES else "citizen"
-    user = db.one("SELECT * FROM users WHERE phone=?", phone)
-    if not user:
-        user = db.insert("users", id=db.new_id(), phone=phone, role=role, status="active", created_at=db.now(), last_seen=db.now())
-    elif role == "admin" and user["role"] != "admin":
-        db.ex("UPDATE users SET role='admin' WHERE id=?", user["id"])
-    return _active(db.one("SELECT * FROM users WHERE id=?", user["id"]))
+def _burn(pw):
+    """Spend the same time as a real check so unknown accounts can't be told apart by timing."""
+    global _DUMMY
+    _DUMMY = _DUMMY or hash_password(secrets.token_hex(8))
+    password_ok(_DUMMY, pw)
 
 
-def _active(user):
-    if user["status"] != "active":
-        raise HTTPException(403, "This account is not active. Contact your municipal administrator.")
-    return user
+def check_new_password(pw):
+    if len(pw) < 8 or len(pw) > 128 or pw.isdigit() or pw.isalpha():
+        raise HTTPException(422, "Use 8–128 characters with letters and numbers")
 
 
-def _password_login(user, pw, wrong):
-    t = db.now()
-    if not user or not user["password_hash"]:
-        raise HTTPException(401, wrong)
-    if (user["locked_until"] or 0) > t:
-        raise HTTPException(429, f"Too many failed attempts. Try again in {(user['locked_until'] - t) // 60 + 1} min.")
-    if not _password_ok(user["password_hash"], pw):
-        fails = user["failed_logins"] + 1
-        db.ex("UPDATE users SET failed_logins=?, locked_until=? WHERE id=?", fails % 5, t + 900 if fails >= 5 else None, user["id"])
-        raise HTTPException(401, wrong)
-    db.ex("UPDATE users SET failed_logins=0, locked_until=NULL, last_seen=? WHERE id=?", t, user["id"])
-    return _active(user)
+def normalize_email(email):
+    email = (email or "").strip().lower()
+    if len(email) > 254 or not EMAIL_RE.match(email):
+        raise HTTPException(422, "Enter a valid email address")
+    return email
 
 
-def citizen_password_login(phone, pw):
-    u = db.one("SELECT * FROM users WHERE phone=? AND role IN ('citizen','commuter')", phone)
-    return _password_login(u, pw, "Incorrect mobile number or password")
+# ---------- Rate limiting (per client IP, in memory) ----------
+_hits = defaultdict(deque)
 
 
-def staff_login(employee_id, pw):
-    u = db.one("SELECT * FROM users WHERE employee_id=? AND role IN ('worker','ward_officer')", employee_id.strip().upper())
-    return _password_login(u, pw, "Incorrect Employee ID or password")
+def rate_limit(request: Request, bucket, limit, window=60):
+    key, t = (bucket, request.client.host if request.client else "?"), time.time()
+    q = _hits[key]
+    while q and q[0] < t - window:
+        q.popleft()
+    if len(q) >= limit:
+        raise HTTPException(429, "Too many attempts. Please wait a minute and try again.")
+    q.append(t)
 
 
-def set_password(user, current, new):
-    if len(new) < 8 or new.isdigit() or new.isalpha():
-        raise HTTPException(422, "Use at least 8 characters with letters and numbers")
-    if user["password_hash"] and not user["must_change_password"] and not _password_ok(user["password_hash"], current or ""):
-        raise HTTPException(401, "Current password is incorrect")
-    db.ex("UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?", hash_password(new), user["id"])
+# ---------- Sessions: opaque random tokens, stored hashed, valid until logout ----------
+def issue_token(user_id):
+    token = secrets.token_urlsafe(32)
+    db.insert("sessions", id=_sha(token), user_id=user_id, created_at=db.now())
+    return token
 
 
-def profile(u):
-    return {"id": u["id"], "phone": u["phone"], "role": u["role"], "name": u["name"], "employee_id": u["employee_id"], "ward": u["ward"], "address": u["address"],
-            "must_change_password": bool(u["must_change_password"]), "has_password": bool(u["password_hash"])}
+def end_session(token):
+    db.ex("DELETE FROM sessions WHERE id=?", _sha(token))
+
+
+def end_all_sessions(user_id, keep=None):
+    db.ex("DELETE FROM sessions WHERE user_id=? AND id!=?", user_id, _sha(keep) if keep else "")
+
+
+def _bearer(authorization):
+    return authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
 
 
 def current_user(authorization: str = Header("")):
-    uid = _verify(authorization[7:]) if authorization.lower().startswith("bearer ") else None
-    user = db.one("SELECT * FROM users WHERE id=?", uid) if uid else None
+    token = _bearer(authorization)
+    s = db.one("SELECT user_id FROM sessions WHERE id=?", _sha(token)) if token else None
+    user = db.one("SELECT * FROM users WHERE id=?", s["user_id"]) if s else None
     if user and user["status"] != "active":
         raise HTTPException(403, "This account is no longer active")
     return user
@@ -182,5 +152,129 @@ def require(role):
     return dep
 
 
-def mask(phone):
-    return f"Citizen ••{phone[-2:]}" if phone else "Municipal staff"
+# ---------- Signed, short-lived URLs for private files (no session token in URLs) ----------
+def sign_file(key, ttl=3600):
+    exp = db.now() + ttl
+    return f"exp={exp}&sig={_b64(hmac.new(_secret(), f'{key}:{exp}'.encode(), hashlib.sha256).digest())}"
+
+
+def file_sig_ok(key, exp, sig):
+    want = _b64(hmac.new(_secret(), f"{key}:{exp}".encode(), hashlib.sha256).digest())
+    return exp >= db.now() and hmac.compare_digest(want, sig or "")
+
+
+# ---------- Email tokens (verification, password reset): single use, stored hashed ----------
+def new_email_token(user_id, kind, data=None):
+    t = db.now()
+    recent = db.q("SELECT created_at FROM email_tokens WHERE user_id=? AND kind=? AND created_at>? ORDER BY created_at DESC", user_id, kind, t - 3600)
+    if recent and recent[0]["created_at"] > t - 60:
+        raise HTTPException(429, "An email was just sent. Please wait a minute before asking again.")
+    if len(recent) >= 5:
+        raise HTTPException(429, "Too many emails requested. Try again in an hour.")
+    token = secrets.token_urlsafe(32)
+    db.ex("UPDATE email_tokens SET expires=0 WHERE user_id=? AND kind=?", user_id, kind)
+    db.insert("email_tokens", id=_sha(token), user_id=user_id, kind=kind, expires=t + (VERIFY_TTL if kind == "verify" else RESET_TTL), created_at=t,
+              data=data)
+    return token
+
+
+def use_email_token(token, kind):
+    row = db.one("SELECT * FROM email_tokens WHERE id=? AND kind=?", _sha(token or ""), kind)
+    if not row or row["expires"] < db.now():
+        raise HTTPException(400, "This link is invalid or has expired. Request a new one.")
+    db.ex("UPDATE email_tokens SET expires=0 WHERE id=?", row["id"])
+    return row
+
+
+def pending_password(user_id):
+    """Password chosen at registration; applied only once the email owner clicks the verification link."""
+    row = db.one("SELECT data FROM email_tokens WHERE user_id=? AND kind='verify' ORDER BY created_at DESC LIMIT 1", user_id)
+    return row["data"] if row else None
+
+
+# ---------- Logins ----------
+def _active(user):
+    if user["status"] != "active":
+        raise HTTPException(403, "This account is not active. Contact your municipal administrator.")
+    return user
+
+
+def _password_login(user, pw, wrong):
+    t = db.now()
+    if not user or not user["password_hash"]:
+        _burn(pw)
+        raise HTTPException(401, wrong)
+    if (user["locked_until"] or 0) > t:
+        raise HTTPException(429, f"Too many failed attempts. Try again in {(user['locked_until'] - t) // 60 + 1} min.")
+    if not password_ok(user["password_hash"], pw):
+        fails = user["failed_logins"] + 1
+        db.ex("UPDATE users SET failed_logins=?, locked_until=? WHERE id=?", fails % 5, t + 900 if fails >= 5 else None, user["id"])
+        raise HTTPException(401, wrong)
+    db.ex("UPDATE users SET failed_logins=0, locked_until=NULL, last_seen=? WHERE id=?", t, user["id"])
+    if _needs_rehash(user["password_hash"]) and user["role"] != "admin":
+        db.ex("UPDATE users SET password_hash=? WHERE id=?", hash_password(pw), user["id"])
+    return _active(user)
+
+
+def email_login(email, pw):
+    u = db.one("SELECT * FROM users WHERE email=? AND role IN ('citizen','commuter','admin')", email.strip().lower())
+    if u and not u["email_verified"]:
+        if password_ok(pending_password(u["id"]), pw):
+            raise HTTPException(403, {"code": "email_unverified", "message": "Verify your email first. Check your inbox for the link."})
+        u = None
+    return _password_login(u, pw, "Incorrect email or password")
+
+
+def staff_login(employee_id, pw):
+    u = db.one("SELECT * FROM users WHERE employee_id=? AND role IN ('worker','ward_officer')", employee_id.strip().upper())
+    return _password_login(u, pw, "Incorrect Employee ID or password")
+
+
+def set_password(user, current, new):
+    check_new_password(new)
+    if user["role"] == "admin":
+        raise HTTPException(403, "The administrator password is managed in the server configuration")
+    if user["password_hash"] and not user["must_change_password"] and not password_ok(user["password_hash"], current or ""):
+        raise HTTPException(401, "Current password is incorrect")
+    db.ex("UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?", hash_password(new), user["id"])
+
+
+def bootstrap_admin():
+    """Create or update the single administrator from ADMIN_EMAIL / ADMIN_PHONE / ADMIN_PASSWORD_HASH."""
+    if not C.ADMIN_EMAIL:
+        return
+    if C.ADMIN_PASSWORD_HASH:
+        try:
+            _parse(C.ADMIN_PASSWORD_HASH)
+        except (ValueError, TypeError):
+            raise RuntimeError("ADMIN_PASSWORD_HASH is not a valid hash. Generate one with: python -m app.hash_password") from None
+    else:
+        print("[auth] ADMIN_PASSWORD_HASH is not set; the administrator cannot sign in until it is.", flush=True)
+    phone = C.ADMIN_PHONE or None
+    u = db.one("SELECT * FROM users WHERE email=?", C.ADMIN_EMAIL)
+    if phone and db.one("SELECT 1 AS x FROM users WHERE phone=? AND (email IS NULL OR email!=?)", phone, C.ADMIN_EMAIL):
+        print("[auth] ADMIN_PHONE already belongs to another account; not assigned to the administrator.", flush=True)
+        phone = u["phone"] if u else None
+    with db.tx():
+        db.ex("UPDATE users SET role='citizen' WHERE role='admin' AND (email IS NULL OR email!=?)", C.ADMIN_EMAIL)
+        if u:
+            db.ex("UPDATE users SET role='admin', status='active', email_verified=1, phone=?, password_hash=?, must_change_password=0 WHERE id=?",
+                  phone, C.ADMIN_PASSWORD_HASH or None, u["id"])
+            if u["password_hash"] != (C.ADMIN_PASSWORD_HASH or None):
+                db.ex("DELETE FROM sessions WHERE user_id=?", u["id"])
+        else:
+            db.insert("users", id=db.new_id(), email=C.ADMIN_EMAIL, email_verified=1, phone=phone, name="Administrator", role="admin", status="active",
+                      password_hash=C.ADMIN_PASSWORD_HASH or None, created_at=db.now())
+
+
+def profile(u):
+    return {"id": u["id"], "email": u["email"], "email_verified": bool(u["email_verified"]), "phone": u["phone"], "role": u["role"], "name": u["name"],
+            "employee_id": u["employee_id"], "ward": u["ward"], "address": u["address"], "must_change_password": bool(u["must_change_password"]),
+            "has_password": bool(u["password_hash"]), "google": bool(u["google_sub"])}
+
+
+def mask(role, uid):
+    """Public label for a person; never exposes email, phone or name."""
+    if role in ("worker", "ward_officer", "admin"):
+        return "Municipal staff"
+    return f"Citizen ••{(uid or '')[-2:].upper()}" if uid else "Citizen"

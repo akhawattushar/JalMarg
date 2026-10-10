@@ -50,6 +50,6 @@ export async function createGoogle(cfg: Config, o: EngineOpts): Promise<Engine> 
       points.forEach(([lng, lat]) => b.extend({ lat, lng }))
       map.fitBounds(b, pad)
     },
-    destroy() { clusterer.clearMarkers(); lines.forEach((l) => l.setMap(null)) },
+    destroy() { clusterer.clearMarkers(); clusterer.setMap(null); lines.forEach((l) => l.setMap(null)); if (user) user.map = null; if (dest) dest.map = null },
   }
 }

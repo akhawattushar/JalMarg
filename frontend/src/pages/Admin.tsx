@@ -11,7 +11,7 @@ import { ago, VERIFICATION, when } from '../lib/format'
 
 type Rep = { id: string; incident_id: string; road_name: string | null; address: string | null; severity: Severity; verification: Verification; gps_accuracy: number
   captured_at: number; server_received_at: number; match_decision: string; note: string; reporter: string; signals: Signal[]; evidence: { image_url: string; original_url: string; original_hash: string } | null }
-type User = { id: string; phone: string; name: string | null; address: string | null; role: Role; status: string; created_at: number; last_seen: number; reports: number; flagged: number }
+type User = { id: string; email: string | null; email_verified: number; phone: string | null; name: string | null; address: string | null; role: Role; status: string; created_at: number; last_seen: number; reports: number; flagged: number }
 type Audit = { id: string; action: string; target: string; detail: string; created_at: number; phone: string }
 const TABS = ['reports', 'staff', 'citizens', 'audit'] as const
 
@@ -61,8 +61,8 @@ export default function Admin() {
             <thead className="bg-subtle text-left text-xs text-muted"><tr>{['Citizen', 'Type', 'Reports', 'Flagged', 'Last seen', 'Status'].map((h) => <th key={h} className="px-4 py-2 font-medium">{h}</th>)}</tr></thead>
             <tbody>{users.map((u) => (
               <tr key={u.id} className="border-t border-line">
-                <td className="max-w-[240px] px-4 py-2.5"><div className="truncate font-medium">{u.name || u.phone}</div>
-                  <div className="truncate text-xs text-muted" title={u.address || ''}>{u.name ? u.phone : ''}{u.address ? `${u.name ? ' · ' : ''}${u.address}` : ''}</div></td>
+                <td className="max-w-[240px] px-4 py-2.5"><div className="truncate font-medium">{u.name || u.email}{!u.email_verified && <span className="ml-2 text-[11px] font-normal text-amber-700">unverified</span>}</div>
+                  <div className="truncate text-xs text-muted" title={u.address || ''}>{u.name ? u.email : ''}{u.address ? `${u.name ? ' · ' : ''}${u.address}` : ''}</div></td>
                 <td className="px-4 py-2.5"><select aria-label="Type" className="input h-9 w-32" value={u.role} onChange={(e) => act(api(`/admin/users/${u.id}`, { method: 'PATCH', body: { role: e.target.value } }), 'Updated')}>
                   <option value="citizen">Citizen</option><option value="commuter">Commuter</option></select></td>
                 <td className="px-4 py-2.5 tabular-nums">{u.reports}</td><td className="px-4 py-2.5 tabular-nums">{u.flagged}</td><td className="px-4 py-2.5 text-muted">{ago(u.last_seen)}</td>

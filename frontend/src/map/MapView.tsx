@@ -17,7 +17,8 @@ export default function MapView({ center, zoom = 13, incidents = [], selected = 
 
   useEffect(() => {
     let e: Engine | null = null, dead = false
-    getConfig().then((cfg) => createEngine(cfg, { el: el.current!, center, zoom, interactive, onSelect: (id) => select.current?.(id) }))
+    // The map still renders (OpenStreetMap) when /config is unreachable.
+    getConfig().catch(() => null).then((cfg) => createEngine(cfg, { el: el.current!, center, zoom, interactive, onSelect: (id) => select.current?.(id) }))
       .then((x) => { if (dead) x.destroy(); else { e = x; setEngine(x) } }).catch(() => setError(true))
     return () => { dead = true; e?.destroy() }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps

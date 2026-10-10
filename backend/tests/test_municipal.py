@@ -67,39 +67,8 @@ def test_admin_moderation_and_roles(client):
     assert db.one("SELECT status FROM incidents")["status"] == "rejected"
     assert client.patch(f"/admin/users/{citizen['id']}", json={"role": "worker"}, headers=h(admin)).status_code == 422
     client.patch(f"/admin/users/{citizen['id']}", json={"status": "blocked"}, headers=h(admin))
-    assert client.get("/me", headers=h(citizen)).status_code == 403
+    assert client.get("/me", headers=h(citizen)).status_code == 401  # blocking revokes their sessions
     assert {"user.update", "report.verification"} <= {a["action"] for a in client.get("/admin/audit", headers=h(admin)).json()}
-
-
-def _otp(client, monkeypatch, phone, purpose="citizen"):
-    import secrets
-    monkeypatch.setattr(secrets, "randbelow", lambda n: 123456)
-    db.ex("DELETE FROM otps")
-    start = client.post("/auth/otp/start", json={"phone": phone, "purpose": purpose})
-    if start.status_code != 200:
-        return start
-    return client.post("/auth/otp/verify", json={"phone": phone, "code": "123456", "purpose": purpose})
-
-
-def test_citizen_otp_and_password_login(client, monkeypatch):
-    assert client.post("/auth/otp/start", json={"phone": "+91123"}).status_code == 422
-    client.post("/auth/otp/start", json={"phone": "+919812345678"})
-    assert client.post("/auth/otp/verify", json={"phone": "+919812345678", "code": "000000"}).status_code == 400
-    r = _otp(client, monkeypatch, "+919812345678").json()
-    auth_h = {"Authorization": f"Bearer {r['token']}"}
-    assert r["user"]["role"] == "citizen" and not r["user"]["has_password"]
-    assert client.get("/me", headers={"Authorization": f"Bearer {r['token']}x"}).status_code == 401
-    assert client.post("/me/password", json={"new": "short"}, headers=auth_h).status_code == 422
-    assert client.post("/me/password", json={"new": "monsoon2026"}, headers=auth_h).json()["has_password"]
-    assert client.post("/auth/password", json={"phone": "+919812345678", "password": "wrong-pass1"}).status_code == 401
-    assert client.post("/auth/password", json={"phone": "+919812345678", "password": "monsoon2026"}).json()["user"]["role"] == "citizen"
-
-
-def test_admin_login_only_for_admin_phones(client, monkeypatch):
-    from app import config
-    monkeypatch.setattr(config, "ADMIN_PHONES", {"+919876543210"})
-    assert _otp(client, monkeypatch, "+919811112222", "admin").status_code == 403
-    assert _otp(client, monkeypatch, "+919876543210", "admin").json()["user"]["role"] == "admin"
 
 
 def test_staff_accounts_employee_id_login(client):

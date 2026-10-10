@@ -3,7 +3,8 @@ import { ChevronRight, ClipboardList, CloudOff, HardHat, LogOut, Navigation, Shi
 import PasswordForm from '../components/PasswordForm'
 import ProfileForm from '../components/ProfileForm'
 import { Page, Row, Section } from '../components/ui'
-import { can, displayName, ROLE_LABEL, signOut, useSession } from '../lib/auth'
+import { logout } from '../lib/api'
+import { can, displayName, ROLE_LABEL, useSession } from '../lib/auth'
 import { ago } from '../lib/format'
 import { discard, retryPending, usePending } from '../lib/queue'
 
@@ -18,12 +19,13 @@ export default function Account() {
       <div className="grid gap-4">
         <div className="card flex items-center justify-between gap-3 p-4">
           <div className="min-w-0"><div className="truncate font-semibold">{u ? displayName(u) : 'Guest'}</div><div className="text-sm text-muted">{u ? ROLE_LABEL[u.role] : 'Sign in to report and confirm incidents'}</div></div>
-          {s ? <button onClick={() => { signOut(); nav('/login', { replace: true }) }} className="btn-outline"><LogOut size={16} />Sign out</button> : <Link to="/login?next=/account" className="btn-primary">Sign in</Link>}
+          {s ? <button onClick={() => { logout(); nav('/login', { replace: true }) }} className="btn-outline"><LogOut size={16} />Sign out</button> : <Link to="/login?next=/account" className="btn-primary">Sign in</Link>}
         </div>
         {u && <Section title="Profile">
           {u.employee_id && <Row k="Employee ID" v={u.employee_id} />}
           {u.employee_id && <Row k="Name" v={u.name} />}
           {u.ward && <Row k="Ward" v={u.ward} />}
+          {u.email && <Row k="Email" v={u.email} />}
           {u.phone && <Row k="Mobile" v={u.phone} />}
           <Row k="Role" v={ROLE_LABEL[u.role]} />
           <div className="mt-4 border-t border-line pt-4"><ProfileForm user={u} /></div>
@@ -44,11 +46,11 @@ export default function Account() {
           {can(s, 'admin') && <Item to="/admin" icon={<Shield size={18} className="text-muted" />} label="Admin" />}
         </div>
         {u && u.role !== 'admin' && <Section title={u.has_password ? 'Change password' : 'Set a password'}>
-          {!u.has_password && <p className="mb-3 text-sm text-muted">Optional. Lets you sign in with mobile number and password instead of a one-time code.</p>}
+          {!u.has_password && <p className="mb-3 text-sm text-muted">Optional. Lets you sign in with your email and a password as well as with Google.</p>}
           <PasswordForm user={u} />
         </Section>}
         <Section title="Privacy">
-          <p className="text-sm leading-relaxed text-muted">Precise location is collected only with a report or confirmation, for verification, road matching, duplicate detection and municipal response. Your phone number is never shown publicly. Original photos are visible only to municipal staff; the public sees the watermarked evidence image.</p>
+          <p className="text-sm leading-relaxed text-muted">Precise location is collected only with a report or confirmation, for verification, road matching, duplicate detection and municipal response. Your email address is never shown publicly. Original photos are visible only to municipal staff; the public sees the watermarked evidence image.</p>
         </Section>
       </div>
     </Page>

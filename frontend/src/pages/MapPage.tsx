@@ -14,8 +14,9 @@ const DEFAULT = { lat: 28.6139, lng: 77.209 }
 
 export default function MapPage() {
   const session = useSession()
-  const { fix, error } = useLocation()
+  const { fix, error } = useLocation(true, true)
   const [anchor, setAnchor] = useState<Fix | null>(null)
+  const [slow, setSlow] = useState(false)
   const [items, setItems] = useState<Incident[] | null>(null)
   const [failed, setFailed] = useState(false)
   const [wx, setWx] = useState<Weather | null>(null)
@@ -27,7 +28,9 @@ export default function MapPage() {
   const [place, setPlace] = useState<string | null>(null)
 
   useEffect(() => { if (fix && (!anchor || distance(anchor, fix) > 1000)) { setAnchor(fix); setFocus(fix) } }, [fix]) // eslint-disable-line react-hooks/exhaustive-deps
-  const at = anchor || (error ? DEFAULT : null)
+  // Don't leave the page empty while the permission prompt is ignored or GPS is slow: show the default city meanwhile.
+  useEffect(() => { const t = setTimeout(() => setSlow(true), 8000); return () => clearTimeout(t) }, [])
+  const at = anchor || (error || slow ? DEFAULT : null)
 
   useEffect(() => {
     if (!at) return
@@ -35,7 +38,8 @@ export default function MapPage() {
     load()
     api<Weather>(`/weather?lat=${at.lat}&lng=${at.lng}`).then(setWx).catch(() => null)
     api<Risk>(`/risk?lat=${at.lat}&lng=${at.lng}`).then(setRisk).catch(() => null)
-    if (anchor) api<{ address: string }>(`/places/reverse?lat=${at.lat}&lng=${at.lng}`).then((r) => setPlace(r.address)).catch(() => setPlace(null))
+    if (anchor) api<{ address: string }>(`/places/reverse?lat=${at.lat.toFixed(5)}&lng=${at.lng.toFixed(5)}`).then((r) => setPlace(r.address)).catch(() => setPlace(null))
+    else setPlace(null)
     const t = setInterval(load, 60000)
     return () => clearInterval(t)
   }, [at?.lat, at?.lng]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -78,9 +82,9 @@ export default function MapPage() {
       <div className="relative min-w-0 flex-1">
         <MapView center={at || DEFAULT} zoom={13} incidents={markers} selected={sel} onSelect={pick} user={fix} focus={focus}
           padding={{ top: 60, right: 40, bottom: 200, left: 40 }} />
-        {error && <div className="absolute inset-x-3 top-3 z-10 lg:left-auto lg:w-96"><Notice tone="warn"><span className="flex items-center gap-1.5"><MapPinOff size={14} />{error}</span></Notice></div>}
+        {error && !fix && <div className="absolute inset-x-3 top-3 z-10 lg:left-auto lg:w-96"><Notice tone="warn"><span className="flex items-center gap-1.5"><MapPinOff size={14} className="shrink-0" />{error} Showing New Delhi.</span></Notice></div>}
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 grid gap-2 p-3 pt-[max(.75rem,env(safe-area-inset-top))] lg:hidden">
-          {!error && <div className="pointer-events-auto card grid gap-1 px-3 py-2 shadow-sm">
+          {!(error && !fix) && <div className="pointer-events-auto card grid gap-1 px-3 py-2 shadow-sm">
             {place && <p className="flex items-center gap-1.5 text-xs text-muted"><MapPin size={12} className="shrink-0" /><span className="truncate">{place}</span></p>}
             <WeatherStrip wx={wx} risk={risk} />{!wx && <span className="text-sm text-muted">Loading conditions…</span>}</div>}
           <div className="pointer-events-auto">{filters}</div>

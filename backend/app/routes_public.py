@@ -2,7 +2,7 @@ import hashlib
 import json
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Response, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -13,6 +13,7 @@ from .providers import maps as M
 from .providers import vision
 from .providers import weather as W
 from .providers.storage import storage
+from .routes_auth import google_enabled
 from .services import evidence as EV
 from .services import matching, risk
 from .services import verification as V
@@ -26,57 +27,13 @@ Lat, Lng = Field(ge=-90, le=90), Field(ge=-180, le=180)
 def config():
     return {"map_provider": M.maps.name, "map_attribution": M.maps.attribution, "weather_provider": W.service.name,
             "google_maps_key": C.GOOGLE_BROWSER_KEY if M.maps.name == "google" else "", "google_map_id": C.GOOGLE_MAP_ID,
-            "max_gps_accuracy_m": C.MAX_GPS_ACCURACY_M, "problem_types": PROBLEMS, "severities": SEVERITIES}
-
-
-class Phone(BaseModel):
-    phone: str
-    purpose: Literal["citizen", "admin"] = "citizen"
-
-
-class Otp(Phone):
-    code: str = Field(min_length=6, max_length=6)
-
-
-class PasswordLogin(BaseModel):
-    phone: str
-    password: str = Field(min_length=1, max_length=128)
-
-
-class StaffLogin(BaseModel):
-    employee_id: str = Field(min_length=3, max_length=32)
-    password: str = Field(min_length=1, max_length=128)
+            "max_gps_accuracy_m": C.MAX_GPS_ACCURACY_M, "problem_types": PROBLEMS, "severities": SEVERITIES,
+            "google_auth": google_enabled()}
 
 
 class NewPassword(BaseModel):
-    current: str = ""
+    current: str = Field("", max_length=128)
     new: str = Field(max_length=128)
-
-
-def _session(u):
-    token, ttl = auth.issue_token(u["id"])
-    return {"token": token, "expires_in": ttl, "user": auth.profile(u)}
-
-
-@r.post("/auth/otp/start")
-def otp_start(b: Phone):
-    auth.start_otp(b.phone, b.purpose)
-    return {"sent": True, "expires_in": 300}
-
-
-@r.post("/auth/otp/verify")
-def otp_verify(b: Otp):
-    return _session(auth.verify_otp(b.phone, b.code, b.purpose))
-
-
-@r.post("/auth/password")
-def password_login(b: PasswordLogin):
-    return _session(auth.citizen_password_login(b.phone, b.password))
-
-
-@r.post("/auth/staff")
-def staff_login(b: StaffLogin):
-    return _session(auth.staff_login(b.employee_id, b.password))
 
 
 @r.get("/me")
@@ -96,13 +53,14 @@ def update_me(b: ProfileIn, user=Depends(auth.require_user)):
     if user["role"] in ("worker", "ward_officer"):
         upd.pop("name", None)
     if upd:
-        db.ex(f"UPDATE users SET {', '.join(f'{k}=?' for k in upd)} WHERE id=?", *upd.values(), user["id"])
+        db.ex(f"UPDATE users SET {', '.join(f'{k}=?' for k in upd)} WHERE id=?", *upd.values(), user["id"])  # nosec B608
     return auth.profile(db.one("SELECT * FROM users WHERE id=?", user["id"]))
 
 
 @r.post("/me/password")
-def change_password(b: NewPassword, user=Depends(auth.require_user)):
+def change_password(b: NewPassword, user=Depends(auth.require_user), authorization: str = Header("")):
     auth.set_password(user, b.current, b.new)
+    auth.end_all_sessions(user["id"], keep=auth._bearer(authorization))
     return auth.profile(db.one("SELECT * FROM users WHERE id=?", user["id"]))
 
 
@@ -208,10 +166,11 @@ def incident_detail(iid: str, user=Depends(auth.current_user)):
     staff = bool(user) and user["role"] in auth.STAFF["ward_officer"]
     w = work_of(iid)
     hidden = "" if staff else " AND kind!='issue'" + ("" if w and w["status"] == "done" else " AND kind!='work'")
-    ev = db.q(f"SELECT * FROM evidence WHERE incident_id=?{hidden} ORDER BY created_at DESC LIMIT 12", iid)
-    acts = db.q("SELECT i.kind, i.created_at, u.phone FROM interactions i LEFT JOIN users u ON u.id=i.user_id WHERE incident_id=? "
+    ev = db.q(f"SELECT * FROM evidence WHERE incident_id=?{hidden} ORDER BY created_at DESC LIMIT 12", iid)  # nosec B608
+    acts = db.q("SELECT i.kind, i.created_at, u.role, i.user_id AS uid FROM interactions i LEFT JOIN users u ON u.id=i.user_id WHERE incident_id=? "
                 "AND kind!='follow' ORDER BY i.created_at DESC LIMIT 30", iid)
-    reps = db.q("SELECT r.created_at, r.verification, u.phone FROM reports r LEFT JOIN users u ON u.id=r.user_id WHERE incident_id=? ORDER BY r.created_at", iid)
+    reps = db.q("SELECT r.created_at, r.verification, u.role, r.user_id AS uid FROM reports r LEFT JOIN users u ON u.id=r.user_id "
+                "WHERE incident_id=? ORDER BY r.created_at", iid)
     mine = {k["kind"] for k in db.q("SELECT kind FROM interactions WHERE incident_id=? AND user_id=?", iid, user["id"])} if user else set()
     fb = db.one("SELECT ROUND(AVG(rating), 1) AS avg, COUNT(*) AS n FROM feedback WHERE work_order_id=? AND kind='rating'", w["id"]) if w else None
     mine_fb = {f["kind"] for f in db.q("SELECT kind FROM feedback WHERE work_order_id=? AND user_id=? AND (kind='rating' OR status='open')",
@@ -219,8 +178,8 @@ def incident_detail(iid: str, user=Depends(auth.current_user)):
     who = db.one("SELECT name, employee_id FROM users WHERE id=?", w["assignee_id"]) if w and w["assignee_id"] else None
     return incident_out(inc, staff=staff) | {
         "evidence": [evidence_out(e, staff) for e in ev], "report_count": len(reps),
-        "timeline": sorted([{"kind": "reported", "at": x["created_at"], "who": auth.mask(x["phone"])} for x in reps] +
-                           [{"kind": a["kind"], "at": a["created_at"], "who": auth.mask(a["phone"])} for a in acts], key=lambda x: -x["at"]),
+        "timeline": sorted([{"kind": "reported", "at": x["created_at"], "who": auth.mask(x["role"], x["uid"])} for x in reps] +
+                           [{"kind": a["kind"], "at": a["created_at"], "who": auth.mask(a["role"], a["uid"])} for a in acts], key=lambda x: -x["at"]),
         "work": {k: w[k] for k in ("id", "priority", "created_at", "updated_at", "completed_at", "completion_note", "review_note")}
         | {"status": w["status"] if staff or w["status"] != "pending_review" else "in_progress", "assignee": who,
            "rating": fb["avg"], "ratings": fb["n"]} if w else None,
@@ -319,7 +278,7 @@ class CommentIn(BaseModel):
 @r.get("/incidents/{iid}/comments")
 def comments(iid: str):
     return [{"id": c["id"], "text": c["text"], "at": c["created_at"], "who": user_label(c)}
-            for c in db.q("SELECT c.*, u.phone FROM comments c LEFT JOIN users u ON u.id=c.user_id WHERE incident_id=? ORDER BY c.created_at DESC", iid)]
+            for c in db.q("SELECT c.*, u.role FROM comments c LEFT JOIN users u ON u.id=c.user_id WHERE incident_id=? ORDER BY c.created_at DESC", iid)]
 
 
 @r.post("/incidents/{iid}/comments")
@@ -353,11 +312,15 @@ def hotspots(lat: float | None = None, lng: float | None = None, radius: float =
 
 
 @r.get("/places/reverse")
-def reverse(lat: float, lng: float):
-    road = match_road(lat, lng)
-    if not road:
+def reverse(lat: float = Query(ge=-90, le=90), lng: float = Query(ge=-180, le=180)):
+    try:
+        place = M.maps.reverse(lat, lng)
+    except Exception as e:
+        print("reverse geocoding unavailable:", e)
+        raise HTTPException(503, "Address lookup is temporarily unavailable")
+    if not place:
         raise HTTPException(404, "Address not found for this location")
-    return {"address": road.address, "road": road.name, "locality": road.locality}
+    return place
 
 
 @r.get("/places/search")
@@ -442,9 +405,8 @@ def del_sub(sid: str, user=Depends(auth.require_user)):
 
 
 @r.get("/files/{key:path}")
-def files(key: str, token: str = "", user=Depends(auth.current_user)):
-    user = user or auth.current_user(f"Bearer {token}")
-    if not key.startswith("public/") and not (user and user["role"] in auth.STAFF["ward_officer"]):
+def files(key: str, exp: int = 0, sig: str = "", user=Depends(auth.current_user)):
+    if not (key.startswith("public/") or auth.file_sig_ok(key, exp, sig) or (user and user["role"] in auth.STAFF["ward_officer"])):
         raise HTTPException(404)
     data = storage.read(key)
     if data is None:

@@ -3,7 +3,7 @@ import json
 from fastapi import HTTPException
 
 from . import db
-from .auth import mask
+from .auth import mask, sign_file
 from .providers import maps as M
 from .providers.storage import storage
 
@@ -51,16 +51,22 @@ def incident_out(inc, lat=None, lng=None, staff=False):
     return out
 
 
+def file_url(key):
+    """Private files get a short-lived signed URL, so no session token ever appears in a URL."""
+    url = storage.url(key)
+    return f"{url}?{sign_file(key)}" if url and not key.startswith("public/") else url
+
+
 def evidence_out(e, staff=False):
-    out = {"id": e["id"], "kind": e["kind"], "image_url": storage.url(e["image_key"]), "captured_at": e["captured_at"],
+    out = {"id": e["id"], "kind": e["kind"], "image_url": file_url(e["image_key"]), "captured_at": e["captured_at"],
            "received_at": e["server_received_at"], "gps_accuracy": e["gps_accuracy"]}
     if staff:
-        out |= {"original_url": storage.url(e["original_key"]), "original_hash": e["original_hash"], "lat": e["lat"], "lng": e["lng"]}
+        out |= {"original_url": file_url(e["original_key"]), "original_hash": e["original_hash"], "lat": e["lat"], "lng": e["lng"]}
     return out
 
 
 def user_label(u):
-    return mask(u["phone"]) if u else "Citizen"
+    return mask(u.get("role"), u.get("user_id")) if u else "Citizen"
 
 
 __all__ = ["PROBLEMS", "SEVERITIES", "WORK_FLOW", "match_road", "get_incident", "incident_out", "evidence_out", "near_or_403", "user_label", "work_of"]

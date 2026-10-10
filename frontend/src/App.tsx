@@ -5,8 +5,8 @@ import { Bell, Camera, ClipboardList, HardHat, Map, Navigation, Shield, UserRoun
 import { Logo, Spinner } from './components/ui'
 import PasswordForm from './components/PasswordForm'
 import ProfileForm from './components/ProfileForm'
-import { api } from './lib/api'
-import { can, canReport, displayName, HOME, isGuest, refreshUser, ROLE_LABEL, signOut, useSession } from './lib/auth'
+import { api, logout } from './lib/api'
+import { can, canReport, displayName, HOME, isGuest, refreshUser, ROLE_LABEL, useSession } from './lib/auth'
 import MapPage from './pages/MapPage'
 
 const Report = lazy(() => import('./pages/Report'))
@@ -18,7 +18,10 @@ const Work = lazy(() => import('./pages/Work'))
 const Team = lazy(() => import('./pages/Team'))
 const Admin = lazy(() => import('./pages/Admin'))
 const Login = lazy(() => import('./pages/Login'))
+const AuthPages = lazy(() => import('./pages/AuthPages'))
 const Account = lazy(() => import('./pages/Account'))
+
+const PUBLIC = ['/login', '/forgot-password', '/reset-password', '/verify-email', '/auth/callback']
 
 function useNav() {
   const s = useSession(), staff = can(s, 'worker')
@@ -77,7 +80,7 @@ function MustChangePassword() {
         <h1 className="mt-5 text-xl font-semibold">Set your password</h1>
         <p className="mt-1 text-sm text-muted">Welcome, {displayName(s.user)}{s.user.employee_id ? ` (${s.user.employee_id})` : ''}. Replace the temporary password from your administrator before continuing.</p>
         <div className="mt-5"><PasswordForm user={s.user} /></div>
-        <button onClick={() => { signOut(); location.assign('/login') }} className="btn-ghost mt-2 w-full">Sign out</button>
+        <button onClick={() => { logout(); location.assign('/login') }} className="btn-ghost mt-2 w-full">Sign out</button>
       </div>
     </div>
   )
@@ -90,7 +93,7 @@ function CompleteProfile() {
       <div className="card w-full max-w-md p-6">
         <Logo />
         <h1 className="mt-5 text-xl font-semibold">Complete your profile</h1>
-        <p className="mt-1 text-sm text-muted">Signed in as {s.user.phone}. Your name helps municipal staff follow up on your reports.</p>
+        <p className="mt-1 text-sm text-muted">Signed in as {s.user.email}. Your name helps municipal staff follow up on your reports.</p>
         <div className="mt-5"><ProfileForm user={s.user} submitLabel="Continue" /></div>
       </div>
     </div>
@@ -101,11 +104,12 @@ function Shell() {
   const { pathname } = useLocation()
   const s = useSession()
   useEffect(() => { refreshUser(() => api('/me')) }, [pathname])
-  if (!s && !isGuest() && pathname !== '/login') return <Navigate to={`/login${pathname === '/' ? '' : `?next=${encodeURIComponent(pathname)}`}`} replace />
-  if (s?.user.must_change_password) return <MustChangePassword />
-  if (s && !s.user.name && !s.user.employee_id) return <CompleteProfile />
+  const open = PUBLIC.includes(pathname)
+  if (!s && !isGuest() && !open) return <Navigate to={`/login${pathname === '/' ? '' : `?next=${encodeURIComponent(pathname)}`}`} replace />
+  if (s?.user.must_change_password && !open) return <MustChangePassword />
+  if (s && !s.user.name && !s.user.employee_id && !open) return <CompleteProfile />
   if (pathname === '/report' && !canReport(s)) return <Navigate to={HOME[s!.user.role]} replace />
-  const bare = pathname === '/login' || pathname === '/report'
+  const bare = open || pathname === '/report'
   return (
     <div className="flex h-dvh w-full overflow-hidden">
       {!bare && <Sidebar />}
@@ -123,6 +127,10 @@ function Shell() {
               <Route path="/team" element={<Team />} />
               <Route path="/admin" element={<Admin />} />
               <Route path="/login" element={<Login />} />
+              <Route path="/forgot-password" element={<AuthPages kind="forgot" />} />
+              <Route path="/reset-password" element={<AuthPages kind="reset" />} />
+              <Route path="/verify-email" element={<AuthPages kind="verify" />} />
+              <Route path="/auth/callback" element={<AuthPages kind="google" />} />
               <Route path="/account" element={<Account />} />
               <Route path="*" element={<MapPage />} />
             </Routes>

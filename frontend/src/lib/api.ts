@@ -7,7 +7,7 @@ export class ApiError extends Error {
 }
 
 const message = (d: any, status: number) =>
-  typeof d?.detail === 'string' ? d.detail : Array.isArray(d?.detail) ? d.detail.map((x: any) => x.msg).join(', ') : status === 0 ? 'No internet connection' : `Request failed (${status})`
+  typeof d?.detail === 'string' ? d.detail : typeof d?.detail?.message === 'string' ? d.detail.message : Array.isArray(d?.detail) ? d.detail.map((x: any) => x.msg).join(', ') : status === 0 ? 'No internet connection' : `Request failed (${status})`
 
 export async function api<T = any>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
   const headers: Record<string, string> = {}
@@ -43,11 +43,21 @@ export function upload<T = any>(path: string, form: FormData, onProgress?: (pct:
   })
 }
 
-export const fileUrl = (p?: string | null) => (p ? API + p + (getToken() && p.includes('/private/') ? `?token=${getToken()}` : '') : '')
+// Private files come back from the API as short-lived signed URLs, so no session token is ever put in a URL.
+export const fileUrl = (p?: string | null) => (p ? API + p : '')
+
+/** Ends the session on the server too, so a copied token stops working. */
+export function logout() {
+  const token = getToken()
+  signOut()
+  if (token) fetch(API + '/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => null)
+}
+
+export type AuthResult = { token: string; user: import('./auth').User }
 
 export type Config = {
   map_provider: 'google' | 'osm'; map_attribution: string; weather_provider: string; google_maps_key: string; google_map_id: string
-  max_gps_accuracy_m: number; problem_types: string[]; severities: string[]
+  max_gps_accuracy_m: number; problem_types: string[]; severities: string[]; google_auth: boolean
 }
 let cfg: Promise<Config> | null = null
 export const getConfig = () => (cfg ??= api<Config>('/config').catch((e) => { cfg = null; throw e }))

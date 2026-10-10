@@ -1,11 +1,12 @@
 import { useSyncExternalStore } from 'react'
 
 export type Role = 'citizen' | 'commuter' | 'worker' | 'ward_officer' | 'admin'
-export type User = { id: string; phone: string | null; role: Role; name: string | null; employee_id: string | null; ward: string | null; address: string | null; must_change_password: boolean; has_password: boolean }
-export type Session = { token: string; exp: number; user: User }
+export type User = { id: string; email: string | null; email_verified: boolean; google: boolean; phone: string | null; role: Role; name: string | null; employee_id: string | null; ward: string | null; address: string | null; must_change_password: boolean; has_password: boolean }
+/** Opaque server session; it stays valid until the user signs out. */
+export type Session = { token: string; user: User }
 
 const KEY = 'jm-session'
-const read = (): Session | null => { try { const s = JSON.parse(localStorage.getItem(KEY) || 'null'); return s && s.exp > Date.now() ? s : null } catch { return null } }
+const read = (): Session | null => { try { const s = JSON.parse(localStorage.getItem(KEY) || 'null'); return s?.token && s.user ? { token: s.token, user: s.user } : null } catch { return null } }
 let current = read()
 const subs = new Set<() => void>()
 
@@ -28,9 +29,12 @@ export async function refreshUser(fetchMe: () => Promise<Session['user']>) {
   try { const user = await fetchMe(); if (current && JSON.stringify(user) !== JSON.stringify(current.user)) setSession({ ...current, user }) } catch { /* offline: keep cached profile */ }
 }
 
+/** Only same-app paths are accepted as a post-login destination (no open redirects). */
+export const safeNext = (n: string | null | undefined) => (n && n.startsWith('/') && !n.startsWith('//') && !n.includes('\\') ? n : null)
+
 export const HOME: Record<Role, string> = { citizen: '/', commuter: '/', worker: '/work', ward_officer: '/ward', admin: '/admin' }
 export const ROLE_LABEL: Record<Role, string> = { citizen: 'Citizen', commuter: 'Commuter', worker: 'Municipal worker', ward_officer: 'Ward officer', admin: 'Administrator' }
-export const displayName = (u: User) => u.name || u.phone || u.employee_id || 'Account'
+export const displayName = (u: User) => u.name || u.email || u.employee_id || 'Account'
 
 export const isGuest = () => { try { return sessionStorage.getItem('jm-guest') === '1' } catch { return false } }
 export const setGuest = (on: boolean) => { try { on ? sessionStorage.setItem('jm-guest', '1') : sessionStorage.removeItem('jm-guest') } catch { /* storage unavailable */ } }
