@@ -5,8 +5,8 @@ import { Logo, Notice } from '../components/ui'
 import { api, type AuthResult } from '../lib/api'
 import { Field, useFinish } from './Login'
 
-type Kind = 'forgot' | 'reset' | 'verify' | 'google'
-const TITLE: Record<Kind, string> = { forgot: 'Reset your password', reset: 'Choose a new password', verify: 'Confirming your email', google: 'Signing you in' }
+type Kind = 'forgot' | 'reset' | 'verify'
+const TITLE: Record<Kind, string> = { forgot: 'Reset your password', reset: 'Choose a new password', verify: 'Confirming your email' }
 
 function Shell({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -40,23 +40,19 @@ export default function AuthPages({ kind }: { kind: Kind }) {
   const [done, setDone] = useState(false)
   const token = params.get('token')
 
-  // Google returns here with #code=…&next=… (or #error=…); the fragment never reaches any server log.
-  const [frag] = useState(() => new URLSearchParams(location.hash.slice(1)))
-  useEffect(() => { if (kind === 'google' || token) history.replaceState(null, '', location.pathname) }, [kind, token])
+  // Keep one-time tokens out of the address bar and browser history once read.
+  useEffect(() => { if (token) history.replaceState(null, '', location.pathname) }, [token])
 
   useOnce(kind === 'verify' ? token : null, (t) => {
     api<AuthResult>('/auth/verify-email', { body: { token: t } }).then((r) => finish(r)).catch((e) => setErr(e.message))
-  })
-  useOnce(kind === 'google' ? frag.get('code') : null, (c) => {
-    api<AuthResult>('/auth/google/exchange', { body: { token: c } }).then((r) => finish(r, frag.get('next'))).catch((e) => setErr(e.message))
   })
 
   const call = async (f: () => Promise<unknown>) => { setBusy(true); setErr(null); try { await f() } catch (e: any) { setErr(e.message) } finally { setBusy(false) } }
   const back = <Link to="/login" className="btn-outline">Back to sign in</Link>
 
-  if (kind === 'verify' || kind === 'google') {
-    const problem = err || (kind === 'google' ? frag.get('error') : null) || ((kind === 'verify' ? !token : !frag.get('code')) ? 'This link is incomplete.' : null)
-    return <Shell title={problem ? (kind === 'google' ? 'Google sign-in failed' : 'Link not valid') : TITLE[kind]}>
+  if (kind === 'verify') {
+    const problem = err || (!token ? 'This link is incomplete.' : null)
+    return <Shell title={problem ? 'Link not valid' : TITLE.verify}>
       {problem ? <><Notice>{problem}</Notice>{back}</> : <p className="flex items-center gap-2 text-sm text-muted"><Loader2 size={16} className="animate-spin" />Please wait…</p>}
     </Shell>
   }

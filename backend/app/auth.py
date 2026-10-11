@@ -270,7 +270,7 @@ def bootstrap_admin():
 def profile(u):
     return {"id": u["id"], "email": u["email"], "email_verified": bool(u["email_verified"]), "phone": u["phone"], "role": u["role"], "name": u["name"],
             "employee_id": u["employee_id"], "ward": u["ward"], "address": u["address"], "must_change_password": bool(u["must_change_password"]),
-            "has_password": bool(u["password_hash"]), "google": bool(u["google_sub"])}
+            "has_password": bool(u["password_hash"])}
 
 
 def mask(role, uid):

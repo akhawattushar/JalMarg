@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 
 export type Role = 'citizen' | 'commuter' | 'worker' | 'ward_officer' | 'admin'
-export type User = { id: string; email: string | null; email_verified: boolean; google: boolean; phone: string | null; role: Role; name: string | null; employee_id: string | null; ward: string | null; address: string | null; must_change_password: boolean; has_password: boolean }
+export type User = { id: string; email: string | null; email_verified: boolean; phone: string | null; role: Role; name: string | null; employee_id: string | null; ward: string | null; address: string | null; must_change_password: boolean; has_password: boolean }
 /** Opaque server session; it stays valid until the user signs out. */
 export type Session = { token: string; user: User }
 

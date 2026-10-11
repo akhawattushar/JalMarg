@@ -55,18 +55,16 @@ The database is created automatically at `backend/data/jalmarg.db`. It starts em
 
 | Account | How they sign in | Lands on | Can do |
 |---|---|---|---|
-| **Citizen / Commuter** | Email + password (after confirming the email link), or **Continue with Google** | Live map | Report with live evidence, I SEE IT TOO, comment, follow, safe routes, alerts |
+| **Citizen / Commuter** | Email + password (after confirming the email link) | Live map | Report with live evidence, I SEE IT TOO, comment, follow, safe routes, alerts |
 | **Field worker** | **Employee ID** (e.g. `JM-WRK-1001`) + password | Work orders | Assigned jobs: on the way → start work → mark done with a compulsory live photo |
 | **Ward officer** | **Employee ID** (e.g. `JM-OFF-1001`) + password | Ward dashboard | Priority queue, assign work, verify completion photos, handle citizen issues, add or remove field workers (Field team) |
 | **Admin** | `ADMIN_EMAIL` + the password whose hash is `ADMIN_PASSWORD_HASH` | Admin | Review reports, manage ward officers and field workers, reset passwords, block accounts, audit log |
 
-Staff accounts can't be self-registered. The admin creates officers and workers in **Admin → Staff**, and ward officers add their own field workers under **Field team**, which issues the Employee ID and a temporary password (shown once). The staff member must replace it at first sign-in. Passwords are stored only as salted scrypt hashes, and 5 wrong attempts lock the account for 15 minutes. Staff can't use the email or Google sign-in.
+Staff accounts can't be self-registered. The admin creates officers and workers in **Admin → Staff**, and ward officers add their own field workers under **Field team**, which issues the Employee ID and a temporary password (shown once). The staff member must replace it at first sign-in. Passwords are stored only as salted scrypt hashes, and 5 wrong attempts lock the account for 15 minutes. Staff can't use the citizen email sign-in.
 
 **Accounts and sessions.** Citizens register with name, email and password; the password takes effect only when they click the confirmation link (valid 24 h), so nobody can pre-claim someone else's address. *Forgot password* emails a single-use reset link (valid 30 min) and signs the account out everywhere. Sign-in lasts until the user signs out (sessions are random tokens stored hashed on the server, revoked on sign-out, password reset, or when an account is blocked). In development, emails are printed in the API console; in production set `EMAIL_DELIVERY=smtp` and the `SMTP_*` settings. Guests can view the live map without signing in.
 
 **Administrator.** There is one administrator, configured on the server: `ADMIN_EMAIL`, `ADMIN_PHONE` and `ADMIN_PASSWORD_HASH`. Generate the hash with `python -m app.hash_password` (it prompts for the password and prints only the hash); the plain password is never stored. The account is created or updated at startup, and changing `ADMIN_EMAIL` removes admin rights from the previous address.
-
-**Google sign-in (optional).** In Google Cloud → APIs & Services → Credentials, create an *OAuth client ID* of type *Web application* and add the **Authorized redirect URI** `<API base URL>/auth/google/callback` — `http://localhost:8000/auth/google/callback` locally, `https://<your-api-domain>/auth/google/callback` in production. Put the client ID and secret in `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, set `GOOGLE_REDIRECT_URI` to the same URI and `APP_URL` to the web app's URL. The button appears automatically once configured. It is hidden in the Android app, because Google blocks sign-in inside embedded web views.
 
 **Camera & location:** browsers allow camera and precise location only on `https://` or `http://localhost`. To test on a phone, use the Android app or serve the web app over HTTPS.
 
@@ -117,7 +115,7 @@ Business logic depends on service interfaces, not on vendors. AWS deployment ste
 ## Security & privacy
 
 - Server-side validation of every field, image MIME/size checks (8 MB), GPS accuracy limits, per-user daily report limit, per-IP limits on sign-in and email endpoints, per-account email throttling and lockout after repeated wrong passwords.
-- Sign-up, resend and forgot-password give the same answer whether or not an account exists. Google sign-in uses the authorization-code flow with PKCE, state and nonce; the session is handed to the web app through a one-time code in the URL fragment.
+- Sign-up, resend and forgot-password give the same answer whether or not an account exists.
 - Private photos are served through short-lived signed links; session tokens never appear in URLs.
 - Role-based access: citizen, commuter, worker, ward officer, admin. Every staff and admin action is written to the audit log.
 - Client timestamps, road names and watermark text are never trusted. The server records its own receive time and does its own road matching.
@@ -131,7 +129,7 @@ cd backend && pytest -q && ruff check .
 cd frontend && npm run typecheck && npm run build
 ```
 
-The backend tests cover: live reporting and validation (gallery, poor GPS, bad image, missing fields), same-segment merging, possible duplicates on the same road, a different road nearby, different problem types, resolved incidents, the same user reporting twice, unmatched roads, reused photos and stale captures, I SEE IT TOO rules, unavailable weather, risk changes, routing around hazards, the full work-order lifecycle with notifications and reopening, admin moderation and roles, email registration and verification, password reset, sessions and logout, the env-configured admin, Google sign-in, and signed file links. The suite ignores your `.env`, so it never touches a real database or bucket. Tests use mock providers only; the app itself never does.
+The backend tests cover: live reporting and validation (gallery, poor GPS, bad image, missing fields), same-segment merging, possible duplicates on the same road, a different road nearby, different problem types, resolved incidents, the same user reporting twice, unmatched roads, reused photos and stale captures, I SEE IT TOO rules, unavailable weather, risk changes, routing around hazards, the full work-order lifecycle with notifications and reopening, admin moderation and roles, email registration and verification, password reset, sessions and logout, the env-configured admin, and signed file links. The suite ignores your `.env`, so it never touches a real database or bucket. Tests use mock providers only; the app itself never does.
 
 ## Limitations
 

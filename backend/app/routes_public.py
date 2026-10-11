@@ -13,7 +13,6 @@ from .providers import maps as M
 from .providers import vision
 from .providers import weather as W
 from .providers.storage import storage
-from .routes_auth import google_enabled
 from .services import evidence as EV
 from .services import matching, risk
 from .services import verification as V
@@ -27,8 +26,7 @@ Lat, Lng = Field(ge=-90, le=90), Field(ge=-180, le=180)
 def config():
     return {"map_provider": M.maps.name, "map_attribution": M.maps.attribution, "weather_provider": W.service.name,
             "google_maps_key": C.GOOGLE_BROWSER_KEY if M.maps.name == "google" else "", "google_map_id": C.GOOGLE_MAP_ID,
-            "max_gps_accuracy_m": C.MAX_GPS_ACCURACY_M, "problem_types": PROBLEMS, "severities": SEVERITIES,
-            "google_auth": google_enabled()}
+            "max_gps_accuracy_m": C.MAX_GPS_ACCURACY_M, "problem_types": PROBLEMS, "severities": SEVERITIES}
 
 
 class NewPassword(BaseModel):

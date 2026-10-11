@@ -1,7 +1,5 @@
-import base64
 import json
 import re
-from urllib.parse import parse_qs, urlparse
 
 import pytest
 from conftest import report, user
@@ -113,44 +111,6 @@ def test_admin_bootstrapped_from_env_with_hashed_password(client, monkeypatch):
     monkeypatch.setattr(C, "ADMIN_PASSWORD_HASH", "plaintext")
     with pytest.raises(RuntimeError):
         auth.bootstrap_admin()
-
-
-def _id_token(**claims):
-    enc = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b"=").decode()  # noqa: E731
-    return f"{enc({'alg': 'RS256'})}.{enc(claims)}.sig"
-
-
-def test_google_sign_in(client, monkeypatch):
-    monkeypatch.setattr(C, "GOOGLE_CLIENT_ID", "cid.apps.googleusercontent.com")
-    monkeypatch.setattr(C, "GOOGLE_CLIENT_SECRET", "secret")
-    assert client.get("/config").json()["google_auth"]
-    start = client.get("/auth/google/start?next=//evil.com", follow_redirects=False)
-    q = parse_qs(urlparse(start.headers["location"]).query)
-    assert q["code_challenge_method"] == ["S256"] and q["redirect_uri"] == [C.GOOGLE_REDIRECT_URI]
-
-    class Res:
-        status_code = 200
-
-        def __init__(self, claims):
-            self.claims = claims
-
-        def json(self):
-            return {"id_token": _id_token(**self.claims)}
-    good = {"iss": "https://accounts.google.com", "aud": C.GOOGLE_CLIENT_ID, "exp": db.now() + 300, "nonce": q["nonce"][0],
-            "sub": "g-123", "email": "Asha@Gmail.com", "email_verified": True, "name": "Asha G"}
-    monkeypatch.setattr(routes_auth.http, "post", lambda *a, **k: Res({**good, "aud": "someone-else"}))
-    bad = client.get(f"/auth/google/callback?state={q['state'][0]}&code=abc", follow_redirects=False)
-    assert "error=" in bad.headers["location"]
-    assert "error=" in client.get(f"/auth/google/callback?state={q['state'][0]}&code=abc", follow_redirects=False).headers["location"]  # state is single use
-
-    q = parse_qs(urlparse(client.get("/auth/google/start?next=/alerts", follow_redirects=False).headers["location"]).query)
-    monkeypatch.setattr(routes_auth.http, "post", lambda *a, **k: Res({**good, "nonce": q["nonce"][0]}))
-    loc = client.get(f"/auth/google/callback?state={q['state'][0]}&code=abc", follow_redirects=False).headers["location"]
-    frag = parse_qs(urlparse(loc).fragment)
-    assert loc.startswith(C.APP_URL + "/auth/callback#") and frag["next"] == ["/alerts"]
-    s = client.post("/auth/google/exchange", json={"token": frag["code"][0]}).json()
-    assert s["user"]["email"] == "asha@gmail.com" and s["user"]["google"] and not s["user"]["has_password"]
-    assert client.post("/auth/google/exchange", json={"token": frag["code"][0]}).status_code == 400
 
 
 def test_private_files_use_signed_urls_not_session_tokens(client):

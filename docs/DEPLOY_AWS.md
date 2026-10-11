@@ -61,9 +61,6 @@ SMTP_SECURITY=starttls
 SMTP_USERNAME=...
 SMTP_PASSWORD=...
 SMTP_FROM=JalMarg <no-reply@your-domain>
-GOOGLE_CLIENT_ID=...           # optional Google sign-in
-GOOGLE_CLIENT_SECRET=...
-GOOGLE_REDIRECT_URI=https://13-233-10-20.sslip.io/auth/google/callback
 CONTACT_EMAIL=you@your-domain  # sent to OpenStreetMap services, per their usage policy
 CORS_ORIGINS=https://main.<amplify-id>.amplifyapp.com,capacitor://localhost,https://localhost
 STORAGE_PROVIDER=s3
@@ -87,7 +84,7 @@ Update later with `git pull && DOMAIN=... docker compose up -d --build`. Back up
 3. Rewrites and redirects → add: source `</^[^.]+$|\.(?!(css|gif|ico|jpg|js|png|txt|svg|woff2?|ttf|map|json|webp|webmanifest)$)([^.]+$)/>`, target `/index.html`, type `200 (Rewrite)`.
 4. Deploy, then put the Amplify URL into `CORS_ORIGINS` on the server and restart: `docker compose up -d`.
 5. Google Maps (if used): add the Amplify URL to the browser key's HTTP-referrer restrictions.
-6. Google sign-in (if used): on the OAuth client add `https://13-233-10-20.sslip.io/auth/google/callback` as an *Authorized redirect URI*, and make sure `APP_URL` on the server is the Amplify URL.
+6. Set `APP_URL` on the server to the Amplify URL so links in verification and reset emails open the web app.
 
 ## 5. Android app
 ```bash

@@ -30,7 +30,7 @@ CONTACT_EMAIL = E("CONTACT_EMAIL", "")
 USER_AGENT = E("USER_AGENT", f"JalMarg/1.0 (civic waterlogging reports{'; ' + CONTACT_EMAIL if CONTACT_EMAIL else ''})")
 
 AUTH_SECRET = E("AUTH_SECRET", "")
-# Public URL of the web app; links in emails and the Google sign-in return point here.
+# Public URL of the web app; links in emails point here.
 APP_URL = E("APP_URL", "http://localhost:5173").rstrip("/")
 
 # Single administrator, bootstrapped at startup. The password is stored only as a scrypt hash
@@ -48,11 +48,6 @@ SMTP_PASSWORD = E("SMTP_PASSWORD", "")
 SMTP_FROM = E("SMTP_FROM", SMTP_USERNAME)
 # starttls (port 587) | ssl (port 465) | none (local relay only)
 SMTP_SECURITY = E("SMTP_SECURITY", "starttls")
-
-# Google sign-in (OAuth client of type "Web application").
-GOOGLE_CLIENT_ID = E("GOOGLE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = E("GOOGLE_CLIENT_SECRET", "")
-GOOGLE_REDIRECT_URI = E("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
 
 MAX_GPS_ACCURACY_M = float(E("MAX_GPS_ACCURACY_M", "50"))
 SAME_SEGMENT_M = float(E("SAME_SEGMENT_M", "150"))

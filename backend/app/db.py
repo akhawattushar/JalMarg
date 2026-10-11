@@ -10,14 +10,12 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, phone TEXT UNIQUE, employee_id TEXT UNIQUE, name TEXT, ward TEXT,
   address TEXT, role TEXT NOT NULL DEFAULT 'citizen', status TEXT NOT NULL DEFAULT 'active', password_hash TEXT, must_change_password INTEGER NOT NULL DEFAULT 0,
   failed_logins INTEGER NOT NULL DEFAULT 0, locked_until INTEGER, created_by TEXT, created_at INTEGER NOT NULL, last_seen INTEGER,
-  email TEXT, email_verified INTEGER NOT NULL DEFAULT 0, google_sub TEXT);
+  email TEXT, email_verified INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_sess_user ON sessions(user_id);
 CREATE TABLE IF NOT EXISTS email_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL, expires INTEGER NOT NULL, created_at INTEGER NOT NULL,
   data TEXT);
 CREATE INDEX IF NOT EXISTS ix_etok_user ON email_tokens(user_id, kind, created_at);
-CREATE TABLE IF NOT EXISTS oauth_states (id TEXT PRIMARY KEY, verifier TEXT NOT NULL, next TEXT, expires INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS login_codes (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS road_segments (id TEXT PRIMARY KEY, name TEXT, provider TEXT, locality TEXT, lat REAL, lng REAL);
 CREATE TABLE IF NOT EXISTS incidents (id TEXT PRIMARY KEY, road_segment_id TEXT, road_name TEXT, locality TEXT, address TEXT,
   lat REAL NOT NULL, lng REAL NOT NULL, problem_type TEXT NOT NULL, severity TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active',
@@ -75,12 +73,10 @@ def init():
         c.execute("INSERT INTO users (id, phone, role, status, created_at, last_seen) SELECT id, phone, role, status, created_at, last_seen FROM users_old")
         c.execute("DROP TABLE users_old")
     for table, col, kind in (("users", "address", "TEXT"), ("work_orders", "review_note", "TEXT"), ("work_orders", "reviewed_by", "TEXT"),
-                             ("work_orders", "reviewed_at", "INTEGER"), ("users", "email", "TEXT"), ("users", "email_verified", "INTEGER NOT NULL DEFAULT 0"),
-                             ("users", "google_sub", "TEXT")):
+                             ("work_orders", "reviewed_at", "INTEGER"), ("users", "email", "TEXT"), ("users", "email_verified", "INTEGER NOT NULL DEFAULT 0")):
         if col not in {r["name"] for r in c.execute(f"PRAGMA table_info({table})").fetchall()}:
             c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {kind}")
     c.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_users_email ON users(email)")
-    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_users_google ON users(google_sub)")
 
 
 def q(sql, *a):

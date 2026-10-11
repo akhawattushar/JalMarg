@@ -21,7 +21,7 @@ const Login = lazy(() => import('./pages/Login'))
 const AuthPages = lazy(() => import('./pages/AuthPages'))
 const Account = lazy(() => import('./pages/Account'))
 
-const PUBLIC = ['/login', '/forgot-password', '/reset-password', '/verify-email', '/auth/callback']
+const PUBLIC = ['/login', '/forgot-password', '/reset-password', '/verify-email']
 
 function useNav() {
   const s = useSession(), staff = can(s, 'worker')
@@ -130,7 +130,6 @@ function Shell() {
               <Route path="/forgot-password" element={<AuthPages kind="forgot" />} />
               <Route path="/reset-password" element={<AuthPages kind="reset" />} />
               <Route path="/verify-email" element={<AuthPages kind="verify" />} />
-              <Route path="/auth/callback" element={<AuthPages kind="google" />} />
               <Route path="/account" element={<Account />} />
               <Route path="*" element={<MapPage />} />
             </Routes>

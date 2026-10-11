@@ -57,7 +57,7 @@ export type AuthResult = { token: string; user: import('./auth').User }
 
 export type Config = {
   map_provider: 'google' | 'osm'; map_attribution: string; weather_provider: string; google_maps_key: string; google_map_id: string
-  max_gps_accuracy_m: number; problem_types: string[]; severities: string[]; google_auth: boolean
+  max_gps_accuracy_m: number; problem_types: string[]; severities: string[]
 }
 let cfg: Promise<Config> | null = null
 export const getConfig = () => (cfg ??= api<Config>('/config').catch((e) => { cfg = null; throw e }))

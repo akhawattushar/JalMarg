@@ -7,7 +7,7 @@ import time
 _tmp = tempfile.mkdtemp()
 os.environ.update(JALMARG_IGNORE_DOTENV="1", DATA_DIR=_tmp, DATABASE_URL=f"sqlite:///{_tmp}/test.db", MAP_PROVIDER="osm", WEATHER_PROVIDER="open-meteo",
                   STORAGE_PROVIDER="local", VISION_PROVIDER="none", EMAIL_DELIVERY="console", APP_ENV="test")
-for _k in ("ADMIN_EMAIL", "ADMIN_PASSWORD_HASH", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "AUTH_SECRET"):
+for _k in ("ADMIN_EMAIL", "ADMIN_PASSWORD_HASH", "AUTH_SECRET", "SMTP_PASSWORD"):
     os.environ.pop(_k, None)
 
 import pytest  # noqa: E402
@@ -28,7 +28,7 @@ ROADS = [("seg-mg-1", "MG Road", LAT, LNG, 120), ("seg-mg-2", "MG Road", LAT + 0
 @pytest.fixture(autouse=True)
 def fresh(monkeypatch):
     for t in ("users", "incidents", "reports", "evidence", "interactions", "comments", "work_orders", "notifications", "subscriptions", "audit_log", "sessions",
-              "email_tokens", "oauth_states", "login_codes"):
+              "email_tokens"):
         db.ex(f"DELETE FROM {t}")
     http._cache.clear()
     auth._hits.clear()
