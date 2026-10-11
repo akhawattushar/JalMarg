@@ -138,3 +138,19 @@ def test_blocked_user_sessions_are_revoked(client):
 
 def test_env_values_may_be_quoted():
     assert C.unquote("'scrypt$1$2'") == "scrypt$1$2" and C.unquote('"a b"') == "a b" and C.unquote(" plain ") == "plain" and C.unquote("'") == "'"
+
+
+def test_set_admin_passwords_writes_only_hashes(tmp_path, monkeypatch):
+    from app import set_admin_passwords as S
+    (tmp_path / ".env").write_text("APP_ENV=test\nADMIN_EMAIL=a@x.in,b@x.in\nADMIN_PASSWORD_HASH=\nOTHER=1\n")
+    monkeypatch.setattr(C, "ROOT", tmp_path)
+    monkeypatch.setattr(C, "ADMIN_EMAILS", ["a@x.in", "b@x.in"])
+    monkeypatch.setattr(C, "ADMIN_PASSWORD_HASHES", [""])
+    answers = iter(["gaurav-pass1", "gaurav-pass1", "tushar-pass2", "tushar-pass2"])
+    monkeypatch.setattr(S.getpass, "getpass", lambda prompt="": next(answers))
+    S.main()
+    text = (tmp_path / ".env").read_text()
+    assert "gaurav-pass1" not in text and "tushar-pass2" not in text and "OTHER=1" in text
+    value = C.unquote(text.split("ADMIN_PASSWORD_HASH=")[1].splitlines()[0])
+    h1, h2 = value.split(",")
+    assert auth.password_ok(h1, "gaurav-pass1") and auth.password_ok(h2, "tushar-pass2")

@@ -53,7 +53,7 @@ AUTH_SECRET=<output of: openssl rand -hex 32>
 APP_URL=https://main.<amplify-id>.amplifyapp.com
 ADMIN_EMAIL=admin@your-domain,second-admin@your-domain    # comma-separated, paired by position
 ADMIN_PHONE=+91XXXXXXXXXX,+91YYYYYYYYYY
-ADMIN_PASSWORD_HASH='<hash1>,<hash2>'   # keep the single quotes; each hash from: docker compose run --rm api python -m app.hash_password
+ADMIN_PASSWORD_HASH=          # filled in by the command below
 EMAIL_DELIVERY=smtp
 SMTP_HOST=email-smtp.ap-south-1.amazonaws.com
 SMTP_PORT=587
@@ -69,6 +69,12 @@ AWS_REGION=ap-south-1
 VISION_PROVIDER=bedrock
 VISION_MODEL=anthropic.claude-opus-5-5
 GOOGLE_MAPS_API_KEY=...        # optional, else OpenStreetMap/Open-Meteo
+```
+Set the admin passwords (asks for each admin's password and writes only the hashes into `backend/.env`):
+```bash
+cd deploy
+docker compose run --rm --no-deps -v "$PWD/../backend/.env:/app/.env" api python -m app.set_admin_passwords
+cd ..
 ```
 Start it:
 ```bash
