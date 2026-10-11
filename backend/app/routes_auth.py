@@ -39,10 +39,16 @@ class StaffLogin(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+def link(page, token=None):
+    """Email links open the web app's home page, which always loads even on static hosting without SPA
+    rewrites (S3/CloudFront/Amplify); the app then moves to `page` itself."""
+    return f"{C.APP_URL}/?go={page}" + (f"&token={token}" if token else "")
+
+
 def _send_verify(bg, u, pw_hash, resend=False):
     token = auth.new_email_token(u["id"], "verify", pw_hash, keep_previous=resend)
     bg.add_task(mailer.safe_send, u["email"], "Confirm your JalMarg account", f"Hi {u['name'] or 'there'}, confirm your email to finish creating your "
-                "JalMarg account. The link works for 24 hours.", f"{C.APP_URL}/verify-email?token={token}", "Confirm email")
+                "JalMarg account. The link works for 24 hours.", link("verify-email", token), "Confirm email")
 
 
 @r.post("/register", status_code=202)
@@ -53,7 +59,7 @@ def register(b: Register, bg: BackgroundTasks, request: Request):
     u = db.one("SELECT * FROM users WHERE email=?", email)
     if u and u["email_verified"]:
         bg.add_task(mailer.safe_send, email, "You already have a JalMarg account", "Someone tried to create a JalMarg account with this email. "
-                    "You already have one — sign in, or reset your password if you forgot it.", f"{C.APP_URL}/forgot-password", "Reset password")
+                    "You already have one — sign in, or reset your password if you forgot it.", link("forgot-password"), "Reset password")
         return SENT
     if u and u["role"] not in ("citizen", "commuter"):
         return SENT
@@ -117,7 +123,7 @@ def forgot(b: EmailIn, bg: BackgroundTasks, request: Request):
         except HTTPException:
             return SENT  # throttled; answer the same way so the response reveals nothing
         bg.add_task(mailer.safe_send, u["email"], "Reset your JalMarg password", "We received a request to reset your JalMarg password. "
-                    "The link works for 30 minutes. If you didn't ask for this, ignore this email.", f"{C.APP_URL}/reset-password?token={token}",
+                    "The link works for 30 minutes. If you didn't ask for this, ignore this email.", link("reset-password", token),
                     "Choose a new password")
     return SENT
 

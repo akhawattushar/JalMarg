@@ -38,22 +38,36 @@ export default function AuthPages({ kind }: { kind: Kind }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+  const [verified, setVerified] = useState<AuthResult | null>(null)
   const token = params.get('token')
 
   // Keep one-time tokens out of the address bar and browser history once read.
   useEffect(() => { if (token) history.replaceState(null, '', location.pathname) }, [token])
 
   useOnce(kind === 'verify' ? token : null, (t) => {
-    api<AuthResult>('/auth/verify-email', { body: { token: t } }).then((r) => finish(r)).catch((e) => setErr(e.message))
+    api<AuthResult>('/auth/verify-email', { body: { token: t } }).then(setVerified).catch((e) => setErr(e.message))
   })
 
   const call = async (f: () => Promise<unknown>) => { setBusy(true); setErr(null); try { await f() } catch (e: any) { setErr(e.message) } finally { setBusy(false) } }
   const back = <Link to="/login" className="btn-outline">Back to sign in</Link>
 
   if (kind === 'verify') {
+    if (verified) return (
+      <Shell title="Email verified">
+        <p className="flex gap-2 text-sm text-muted"><CheckCircle2 size={20} className="shrink-0 text-emerald-600" />
+          <span><b className="text-ink">{verified.user.email}</b> is now verified. Your JalMarg account is ready.</span></p>
+        <button onClick={() => finish(verified)} className="btn-primary h-11">Continue to JalMarg</button>
+      </Shell>
+    )
+    if (err && /already confirmed/i.test(err)) return (
+      <Shell title="Email already verified">
+        <p className="flex gap-2 text-sm text-muted"><CheckCircle2 size={20} className="shrink-0 text-emerald-600" />This email address is already verified. Sign in with your email and password.</p>
+        <Link to="/login" className="btn-primary h-11">Sign in</Link>
+      </Shell>
+    )
     const problem = err || (!token ? 'This link is incomplete.' : null)
-    return <Shell title={problem ? (/already confirmed/i.test(problem) ? 'Email already confirmed' : 'Link not valid') : TITLE.verify}>
-      {problem ? <><Notice>{problem}</Notice>{back}</> : <p className="flex items-center gap-2 text-sm text-muted"><Loader2 size={16} className="animate-spin" />Please wait…</p>}
+    return <Shell title={problem ? 'Link not valid' : TITLE.verify}>
+      {problem ? <><Notice>{problem}</Notice>{back}</> : <p className="flex items-center gap-2 text-sm text-muted"><Loader2 size={16} className="animate-spin" />Verifying your email…</p>}
     </Shell>
   }
 
