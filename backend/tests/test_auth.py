@@ -134,3 +134,7 @@ def test_blocked_user_sessions_are_revoked(client):
     admin, citizen = user("admin"), user()
     client.patch(f"/admin/users/{citizen['id']}", json={"status": "blocked"}, headers={"Authorization": admin["Authorization"]})
     assert db.one("SELECT COUNT(*) AS n FROM sessions WHERE user_id=?", citizen["id"])["n"] == 0
+
+
+def test_env_values_may_be_quoted():
+    assert C.unquote("'scrypt$1$2'") == "scrypt$1$2" and C.unquote('"a b"') == "a b" and C.unquote(" plain ") == "plain" and C.unquote("'") == "'"

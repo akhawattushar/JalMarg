@@ -2,12 +2,20 @@ import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def unquote(v):
+    """Accept KEY='value' / KEY="value" like Docker Compose does (quotes keep '$' in hashes literal there)."""
+    v = v.strip()
+    return v[1:-1] if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"" else v
+
+
 # Tests set JALMARG_IGNORE_DOTENV so a developer's .env (database path, S3, real keys) is never used by the suite.
 if (ROOT / ".env").exists() and not os.environ.get("JALMARG_IGNORE_DOTENV"):
     for line in (ROOT / ".env").read_text().splitlines():
         k, _, v = line.partition("=")
         if k.strip() and not k.lstrip().startswith("#"):
-            os.environ.setdefault(k.strip(), v.strip())
+            os.environ.setdefault(k.strip(), unquote(v))
 E = os.environ.get
 DATA_DIR = Path(E("DATA_DIR", ROOT / "data"))
 DB_PATH = E("DATABASE_URL", f"sqlite:///{DATA_DIR / 'jalmarg.db'}").removeprefix("sqlite:///")

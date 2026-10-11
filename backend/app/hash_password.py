@@ -16,6 +16,7 @@ def main():
     if len(pw) < 12:
         print("Warning: use at least 12 characters for the administrator.", file=sys.stderr)
     print(hash_password(pw))
+    print("Paste into ADMIN_PASSWORD_HASH inside single quotes (several admins: comma-separated, same order as ADMIN_EMAIL).", file=sys.stderr)
 
 
 if __name__ == "__main__":
