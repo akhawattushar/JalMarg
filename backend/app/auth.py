@@ -259,6 +259,8 @@ def bootstrap_admin():
     with db.tx():
         placeholders = ",".join("?" * len(C.ADMIN_EMAILS))
         db.ex(f"UPDATE users SET role='citizen' WHERE role='admin' AND (email IS NULL OR email NOT IN ({placeholders}))", *C.ADMIN_EMAILS)  # nosec B608
+        # Release the admins' phones first so numbers can be swapped between admins without tripping the unique constraint.
+        db.ex(f"UPDATE users SET phone=NULL WHERE email IN ({placeholders})", *C.ADMIN_EMAILS)  # nosec B608
         for i, email in enumerate(C.ADMIN_EMAILS):
             pw_hash, phone = _nth(C.ADMIN_PASSWORD_HASHES, i), _nth(C.ADMIN_PHONES, i)
             u = db.one("SELECT * FROM users WHERE email=?", email)

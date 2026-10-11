@@ -154,3 +154,13 @@ def test_set_admin_passwords_writes_only_hashes(tmp_path, monkeypatch):
     value = C.unquote(text.split("ADMIN_PASSWORD_HASH=")[1].splitlines()[0])
     h1, h2 = value.split(",")
     assert auth.password_ok(h1, "gaurav-pass1") and auth.password_ok(h2, "tushar-pass2")
+
+
+def test_admin_phones_can_be_swapped(monkeypatch):
+    monkeypatch.setattr(C, "ADMIN_EMAILS", ["g@x.in", "t@x.in"])
+    monkeypatch.setattr(C, "ADMIN_PASSWORD_HASHES", [""])
+    monkeypatch.setattr(C, "ADMIN_PHONES", ["+919580561706", "+917976416507"])
+    auth.bootstrap_admin()
+    monkeypatch.setattr(C, "ADMIN_PHONES", ["+917976416507", "+919580561706"])
+    auth.bootstrap_admin()
+    assert [db.one("SELECT phone FROM users WHERE email=?", e)["phone"] for e in C.ADMIN_EMAILS] == ["+917976416507", "+919580561706"]
