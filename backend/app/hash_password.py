@@ -1,4 +1,4 @@
-"""Print a scrypt hash for ADMIN_PASSWORD_HASH. Usage: python -m app.hash_password"""
+"""Print a scrypt hash for ADMIN_PASSWORD_HASH (one per admin, comma-separated). Usage: python -m app.hash_password"""
 import getpass
 import sys
 

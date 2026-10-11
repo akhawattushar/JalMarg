@@ -51,9 +51,9 @@ Set these in `backend/.env`:
 APP_ENV=production
 AUTH_SECRET=<output of: openssl rand -hex 32>
 APP_URL=https://main.<amplify-id>.amplifyapp.com
-ADMIN_EMAIL=admin@your-domain
-ADMIN_PHONE=+91XXXXXXXXXX
-ADMIN_PASSWORD_HASH=<output of: docker compose run --rm api python -m app.hash_password>
+ADMIN_EMAIL=admin@your-domain,second-admin@your-domain    # comma-separated, paired by position
+ADMIN_PHONE=+91XXXXXXXXXX,+91YYYYYYYYYY
+ADMIN_PASSWORD_HASH=<hash1>,<hash2>   # each from: docker compose run --rm api python -m app.hash_password
 EMAIL_DELIVERY=smtp
 SMTP_HOST=email-smtp.ap-south-1.amazonaws.com
 SMTP_PORT=587

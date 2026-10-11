@@ -239,32 +239,40 @@ def set_password(user, current, new):
     db.ex("UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?", hash_password(new), user["id"])
 
 
+def _nth(items, i):
+    return (items[i] if i < len(items) else "") or None
+
+
 def bootstrap_admin():
-    """Create or update the single administrator from ADMIN_EMAIL / ADMIN_PHONE / ADMIN_PASSWORD_HASH."""
-    if not C.ADMIN_EMAIL:
+    """Create or update the administrators from ADMIN_EMAIL / ADMIN_PHONE / ADMIN_PASSWORD_HASH (comma-separated, paired by position)."""
+    if not C.ADMIN_EMAILS:
         return
-    if C.ADMIN_PASSWORD_HASH:
-        try:
-            _parse(C.ADMIN_PASSWORD_HASH)
-        except (ValueError, TypeError):
-            raise RuntimeError("ADMIN_PASSWORD_HASH is not a valid hash. Generate one with: python -m app.hash_password") from None
-    else:
-        print("[auth] ADMIN_PASSWORD_HASH is not set; the administrator cannot sign in until it is.", flush=True)
-    phone = C.ADMIN_PHONE or None
-    u = db.one("SELECT * FROM users WHERE email=?", C.ADMIN_EMAIL)
-    if phone and db.one("SELECT 1 AS x FROM users WHERE phone=? AND (email IS NULL OR email!=?)", phone, C.ADMIN_EMAIL):
-        print("[auth] ADMIN_PHONE already belongs to another account; not assigned to the administrator.", flush=True)
-        phone = u["phone"] if u else None
-    with db.tx():
-        db.ex("UPDATE users SET role='citizen' WHERE role='admin' AND (email IS NULL OR email!=?)", C.ADMIN_EMAIL)
-        if u:
-            db.ex("UPDATE users SET role='admin', status='active', email_verified=1, phone=?, password_hash=?, must_change_password=0 WHERE id=?",
-                  phone, C.ADMIN_PASSWORD_HASH or None, u["id"])
-            if u["password_hash"] != (C.ADMIN_PASSWORD_HASH or None):
-                db.ex("DELETE FROM sessions WHERE user_id=?", u["id"])
+    for i, email in enumerate(C.ADMIN_EMAILS):
+        pw_hash = _nth(C.ADMIN_PASSWORD_HASHES, i)
+        if pw_hash:
+            try:
+                _parse(pw_hash)
+            except (ValueError, TypeError):
+                raise RuntimeError(f"ADMIN_PASSWORD_HASH #{i + 1} is not a valid hash. Generate one with: python -m app.hash_password") from None
         else:
-            db.insert("users", id=db.new_id(), email=C.ADMIN_EMAIL, email_verified=1, phone=phone, name="Administrator", role="admin", status="active",
-                      password_hash=C.ADMIN_PASSWORD_HASH or None, created_at=db.now())
+            print(f"[auth] No ADMIN_PASSWORD_HASH for {email}; that administrator cannot sign in until one is set.", flush=True)
+    with db.tx():
+        placeholders = ",".join("?" * len(C.ADMIN_EMAILS))
+        db.ex(f"UPDATE users SET role='citizen' WHERE role='admin' AND (email IS NULL OR email NOT IN ({placeholders}))", *C.ADMIN_EMAILS)  # nosec B608
+        for i, email in enumerate(C.ADMIN_EMAILS):
+            pw_hash, phone = _nth(C.ADMIN_PASSWORD_HASHES, i), _nth(C.ADMIN_PHONES, i)
+            u = db.one("SELECT * FROM users WHERE email=?", email)
+            if phone and db.one("SELECT 1 AS x FROM users WHERE phone=? AND (email IS NULL OR email!=?)", phone, email):
+                print(f"[auth] Phone #{i + 1} already belongs to another account; not assigned to {email}.", flush=True)
+                phone = u["phone"] if u else None
+            if u:
+                db.ex("UPDATE users SET role='admin', status='active', email_verified=1, phone=?, password_hash=?, must_change_password=0 WHERE id=?",
+                      phone, pw_hash, u["id"])
+                if u["password_hash"] != pw_hash:
+                    db.ex("DELETE FROM sessions WHERE user_id=?", u["id"])
+            else:
+                db.insert("users", id=db.new_id(), email=email, email_verified=1, phone=phone, name="Administrator", role="admin", status="active",
+                          password_hash=pw_hash, created_at=db.now())
 
 
 def profile(u):

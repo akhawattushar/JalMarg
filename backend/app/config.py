@@ -33,11 +33,12 @@ AUTH_SECRET = E("AUTH_SECRET", "")
 # Public URL of the web app; links in emails point here.
 APP_URL = E("APP_URL", "http://localhost:5173").rstrip("/")
 
-# Single administrator, bootstrapped at startup. The password is stored only as a scrypt hash
+# Administrators, bootstrapped at startup. The password is stored only as a scrypt hash
 # (generate one with: python -m app.hash_password).
-ADMIN_EMAIL = E("ADMIN_EMAIL", "").strip().lower()
-ADMIN_PHONE = E("ADMIN_PHONE", "").replace(" ", "")
-ADMIN_PASSWORD_HASH = E("ADMIN_PASSWORD_HASH", "")
+# Comma-separated lists, paired by position: the 1st email gets the 1st phone and the 1st hash, and so on.
+ADMIN_EMAILS = [x.strip().lower() for x in E("ADMIN_EMAIL", "").split(",") if x.strip()]
+ADMIN_PHONES = [x.replace(" ", "") for x in E("ADMIN_PHONE", "").split(",")]
+ADMIN_PASSWORD_HASHES = [x.strip() for x in E("ADMIN_PASSWORD_HASH", "").split(",")]
 
 # console (prints links to the API log) | smtp
 EMAIL_DELIVERY = E("EMAIL_DELIVERY", "console")

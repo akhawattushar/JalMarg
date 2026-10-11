@@ -92,23 +92,30 @@ def test_password_hashing():
     assert not auth.password_ok("garbage", "x") and not auth.password_ok(None, "x")
 
 
-def test_admin_bootstrapped_from_env_with_hashed_password(client, monkeypatch):
+def test_admins_bootstrapped_from_env_with_hashed_passwords(client, monkeypatch):
     old_admin = user("admin")
-    monkeypatch.setattr(C, "ADMIN_EMAIL", "admin@jalmarg.in")
-    monkeypatch.setattr(C, "ADMIN_PHONE", "+919876543210")
-    monkeypatch.setattr(C, "ADMIN_PASSWORD_HASH", auth.hash_password("Adm1n-secret-pass"))
+    h1, h2 = auth.hash_password("Adm1n-secret-pass"), auth.hash_password("Second-admin-9")
+    monkeypatch.setattr(C, "ADMIN_EMAILS", ["admin@jalmarg.in", "second@jalmarg.in"])
+    monkeypatch.setattr(C, "ADMIN_PHONES", ["+919876543210", "+919812345678"])
+    monkeypatch.setattr(C, "ADMIN_PASSWORD_HASHES", [h1, h2])
     auth.bootstrap_admin()
-    a = db.one("SELECT * FROM users WHERE email='admin@jalmarg.in'")
-    assert a["role"] == "admin" and a["phone"] == "+919876543210" and a["password_hash"] == C.ADMIN_PASSWORD_HASH
+    a, b = (db.one("SELECT * FROM users WHERE email=?", e) for e in C.ADMIN_EMAILS)
+    assert (a["role"], a["phone"], a["password_hash"]) == ("admin", "+919876543210", h1)
+    assert (b["role"], b["phone"], b["password_hash"]) == ("admin", "+919812345678", h2)
     assert db.one("SELECT role FROM users WHERE id=?", old_admin["id"])["role"] == "citizen"
     s = client.post("/auth/login", json={"email": "ADMIN@jalmarg.in", "password": "Adm1n-secret-pass"}).json()
     assert s["user"]["role"] == "admin"
+    assert client.post("/auth/login", json={"email": "second@jalmarg.in", "password": "Second-admin-9"}).json()["user"]["role"] == "admin"
+    assert client.post("/auth/login", json={"email": "second@jalmarg.in", "password": "Adm1n-secret-pass"}).status_code == 401
     assert client.post("/me/password", json={"new": "changed123"}, headers=h(s["token"])).status_code == 403
-    # Admin manages municipal staff through the existing staff tools.
+    # Admins manage municipal staff through the existing staff tools.
     made = client.post("/staff", json={"name": "Ward Lead", "role": "ward_officer", "ward": "Ward 3"}, headers=h(s["token"]))
     assert made.status_code == 200 and made.json()["employee_id"].startswith("JM-OFF-")
     assert client.post("/auth/forgot-password", json={"email": "admin@jalmarg.in"}).status_code == 202
-    monkeypatch.setattr(C, "ADMIN_PASSWORD_HASH", "plaintext")
+    monkeypatch.setattr(C, "ADMIN_EMAILS", ["admin@jalmarg.in"])
+    auth.bootstrap_admin()
+    assert db.one("SELECT role FROM users WHERE id=?", b["id"])["role"] == "citizen"  # removed from the list -> no longer admin
+    monkeypatch.setattr(C, "ADMIN_PASSWORD_HASHES", ["plaintext"])
     with pytest.raises(RuntimeError):
         auth.bootstrap_admin()
 

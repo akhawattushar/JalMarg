@@ -58,13 +58,13 @@ The database is created automatically at `backend/data/jalmarg.db`. It starts em
 | **Citizen / Commuter** | Email + password (after confirming the email link) | Live map | Report with live evidence, I SEE IT TOO, comment, follow, safe routes, alerts |
 | **Field worker** | **Employee ID** (e.g. `JM-WRK-1001`) + password | Work orders | Assigned jobs: on the way → start work → mark done with a compulsory live photo |
 | **Ward officer** | **Employee ID** (e.g. `JM-OFF-1001`) + password | Ward dashboard | Priority queue, assign work, verify completion photos, handle citizen issues, add or remove field workers (Field team) |
-| **Admin** | `ADMIN_EMAIL` + the password whose hash is `ADMIN_PASSWORD_HASH` | Admin | Review reports, manage ward officers and field workers, reset passwords, block accounts, audit log |
+| **Admin** | An email listed in `ADMIN_EMAIL` + its password (hash in `ADMIN_PASSWORD_HASH`) | Admin | Review reports, manage ward officers and field workers, reset passwords, block accounts, audit log |
 
 Staff accounts can't be self-registered. The admin creates officers and workers in **Admin → Staff**, and ward officers add their own field workers under **Field team**, which issues the Employee ID and a temporary password (shown once). The staff member must replace it at first sign-in. Passwords are stored only as salted scrypt hashes, and 5 wrong attempts lock the account for 15 minutes. Staff can't use the citizen email sign-in.
 
 **Accounts and sessions.** Citizens register with name, email and password; the password takes effect only when they click the confirmation link (valid 24 h), so nobody can pre-claim someone else's address. *Forgot password* emails a single-use reset link (valid 30 min) and signs the account out everywhere. Sign-in lasts until the user signs out (sessions are random tokens stored hashed on the server, revoked on sign-out, password reset, or when an account is blocked). In development, emails are printed in the API console; in production set `EMAIL_DELIVERY=smtp` and the `SMTP_*` settings. Guests can view the live map without signing in.
 
-**Administrator.** There is one administrator, configured on the server: `ADMIN_EMAIL`, `ADMIN_PHONE` and `ADMIN_PASSWORD_HASH`. Generate the hash with `python -m app.hash_password` (it prompts for the password and prints only the hash); the plain password is never stored. The account is created or updated at startup, and changing `ADMIN_EMAIL` removes admin rights from the previous address.
+**Administrators.** Admins are configured on the server: `ADMIN_EMAIL`, `ADMIN_PHONE` and `ADMIN_PASSWORD_HASH` each take a comma-separated list, paired by position (the first email gets the first phone and the first hash). Generate each hash with `python -m app.hash_password` (it prompts for the password and prints only the hash); plain passwords are never stored. The accounts are created or updated at startup, and an address removed from `ADMIN_EMAIL` loses admin rights.
 
 **Camera & location:** browsers allow camera and precise location only on `https://` or `http://localhost`. To test on a phone, use the Android app or serve the web app over HTTPS.
 
