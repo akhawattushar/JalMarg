@@ -52,7 +52,7 @@ export default function AuthPages({ kind }: { kind: Kind }) {
 
   if (kind === 'verify') {
     const problem = err || (!token ? 'This link is incomplete.' : null)
-    return <Shell title={problem ? 'Link not valid' : TITLE.verify}>
+    return <Shell title={problem ? (/already confirmed/i.test(problem) ? 'Email already confirmed' : 'Link not valid') : TITLE.verify}>
       {problem ? <><Notice>{problem}</Notice>{back}</> : <p className="flex items-center gap-2 text-sm text-muted"><Loader2 size={16} className="animate-spin" />Please wait…</p>}
     </Shell>
   }

@@ -164,7 +164,8 @@ def file_sig_ok(key, exp, sig):
 
 
 # ---------- Email tokens (verification, password reset): single use, stored hashed ----------
-def new_email_token(user_id, kind, data=None):
+def new_email_token(user_id, kind, data=None, keep_previous=False):
+    """keep_previous: a resend leaves earlier links working (same pending data), so clicking an older email still succeeds."""
     t = db.now()
     recent = db.q("SELECT created_at FROM email_tokens WHERE user_id=? AND kind=? AND created_at>? ORDER BY created_at DESC", user_id, kind, t - 3600)
     if recent and recent[0]["created_at"] > t - 60:
@@ -172,7 +173,8 @@ def new_email_token(user_id, kind, data=None):
     if len(recent) >= 5:
         raise HTTPException(429, "Too many emails requested. Try again in an hour.")
     token = secrets.token_urlsafe(32)
-    db.ex("UPDATE email_tokens SET expires=0 WHERE user_id=? AND kind=?", user_id, kind)
+    if not keep_previous:
+        db.ex("UPDATE email_tokens SET expires=0 WHERE user_id=? AND kind=?", user_id, kind)
     db.insert("email_tokens", id=_sha(token), user_id=user_id, kind=kind, expires=t + (VERIFY_TTL if kind == "verify" else RESET_TTL), created_at=t,
               data=data)
     return token

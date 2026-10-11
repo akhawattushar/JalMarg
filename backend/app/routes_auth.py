@@ -39,8 +39,8 @@ class StaffLogin(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
-def _send_verify(bg, u, pw_hash):
-    token = auth.new_email_token(u["id"], "verify", pw_hash)
+def _send_verify(bg, u, pw_hash, resend=False):
+    token = auth.new_email_token(u["id"], "verify", pw_hash, keep_previous=resend)
     bg.add_task(mailer.safe_send, u["email"], "Confirm your JalMarg account", f"Hi {u['name'] or 'there'}, confirm your email to finish creating your "
                 "JalMarg account. The link works for 24 hours.", f"{C.APP_URL}/verify-email?token={token}", "Confirm email")
 
@@ -73,7 +73,7 @@ def resend(b: EmailIn, bg: BackgroundTasks, request: Request):
     pending = auth.pending_password(u["id"]) if u else None
     if u and pending:
         try:
-            _send_verify(bg, u, pending)
+            _send_verify(bg, u, pending, resend=True)
         except HTTPException:
             pass  # throttled; answer the same way so the response reveals nothing
     return SENT
@@ -82,6 +82,9 @@ def resend(b: EmailIn, bg: BackgroundTasks, request: Request):
 @r.post("/verify-email")
 def verify_email(b: TokenIn, request: Request):
     auth.rate_limit(request, "token", 20)
+    seen = db.one("SELECT u.email_verified FROM email_tokens t JOIN users u ON u.id=t.user_id WHERE t.id=? AND t.kind='verify'", auth._sha(b.token))
+    if seen and seen["email_verified"]:
+        raise HTTPException(409, "Your email is already confirmed. Sign in with your email and password.")
     row = auth.use_email_token(b.token, "verify")
     u = db.one("SELECT * FROM users WHERE id=?", row["user_id"])
     if not u:

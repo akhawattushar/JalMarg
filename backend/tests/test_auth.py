@@ -38,7 +38,7 @@ def test_register_verify_login_logout(client, outbox):
 
     s = client.post("/auth/verify-email", json={"token": _token(outbox[-1])}).json()
     assert s["user"]["email_verified"] and s["user"]["name"] == "Asha Verma" and s["user"]["has_password"]
-    assert client.post("/auth/verify-email", json={"token": _token(outbox[-1])}).status_code == 400  # single use
+    assert client.post("/auth/verify-email", json={"token": _token(outbox[-1])}).status_code == 409  # single use: "already confirmed"
     assert db.one("SELECT password_hash FROM users WHERE id=?", u["id"])["password_hash"].startswith("scrypt$")
 
     tok = client.post("/auth/login", json=login).json()["token"]
@@ -164,3 +164,15 @@ def test_admin_phones_can_be_swapped(monkeypatch):
     monkeypatch.setattr(C, "ADMIN_PHONES", ["+917976416507", "+919580561706"])
     auth.bootstrap_admin()
     assert [db.one("SELECT phone FROM users WHERE email=?", e)["phone"] for e in C.ADMIN_EMAILS] == ["+917976416507", "+919580561706"]
+
+
+def test_older_verification_link_still_works_after_resend(client, outbox, monkeypatch):
+    client.post("/auth/register", json={"name": "Asha", "email": "asha@example.com", "password": "monsoon2026"})
+    first = _token(outbox[-1])
+    db.ex("UPDATE email_tokens SET created_at=created_at-120")  # past the one-per-minute resend throttle
+    client.post("/auth/resend-verification", json={"email": "asha@example.com"})
+    assert len(outbox) == 2
+    assert client.post("/auth/verify-email", json={"token": first}).status_code == 200
+    again = client.post("/auth/verify-email", json={"token": _token(outbox[-1])})
+    assert again.status_code == 409 and "already confirmed" in again.json()["detail"]
+    assert client.post("/auth/login", json={"email": "asha@example.com", "password": "monsoon2026"}).status_code == 200
